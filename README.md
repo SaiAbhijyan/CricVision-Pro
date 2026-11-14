@@ -89,6 +89,11 @@ After **Finish & report** you get an executive debrief (what went right and wron
 
 ## 3. Architecture at a glance
 
+![Tech stack](docs/figures/stack.png)
+
+*Tech stack (built with the [stack-diagram skill](https://github.com/caru-ini/stack-diagram); interactive [HTML](docs/figures/stack.html)). Vision, physics and rules run in the browser. Only a short text digest reaches the server, which alone holds the AI key.*
+
+
 ```mermaid
 flowchart LR
   subgraph Browser["Browser (on-device)"]
@@ -132,20 +137,16 @@ Key design rules:
 
 **Problem.** The ball touches the bat in a few hundred microseconds, but a camera only records 30 to 240 frames per second. To show the exact contact frame, we use sound. The crack is a sharp, broadband burst; we find it and then look up the video frame whose timestamp is nearest.
 
-![Impact sync bench](docs/figures/fig1-impact-sync-bench-annotated.png)
+![How the app finds the contact frame](docs/figures/fig1-explainer.png)
 
-*Fig 1 is a physical "bench" model of the system, drawn with the Anatomy skill. The original animation is in [`docs/figures/fig1-impact-sync-bench.html`](docs/figures/fig1-impact-sync-bench.html) (open in a browser; [light version](docs/figures/fig1-impact-sync-bench-light.html)). The numbers match the table.*
+*Fig 1. Four steps: the camera keeps a rolling memory of frames, the bat-ball crack is heard, the app spots the spike, and it picks the frame stamped with that time. Source: [`docs/figures/src/fig1-explainer.html`](docs/figures/src/fig1-explainer.html).*
 
-| # | Part in the figure | Real component | What it does |
-|---|---|---|---|
-| 1 | Camera | `getUserMedia` video | produces a frame with a capture timestamp |
-| 2 | Hammer / striker | the real bat-ball impact | creates the sound we listen for |
-| 3 | Microphone | `AudioWorklet` input | streams audio samples at 48 kHz |
-| 4 | Feature cards | `classify()` in `onset-core.ts` | labels the hit: **bat-sweet**, **bat-edge**, or **pad-body**, from a 20 ms window (high-band energy, low-band energy, decay) |
-| 5 | Threshold dial | trigger rule | fires when band energy exceeds **8×** a running noise-floor estimate |
-| 6 | Tile conveyor | `FrameRing<T>` | circular buffer of recent frames (shown as 22 tiles at 120 fps); oldest frames are evicted and their `ImageBitmap` closed |
-| 7 | Gantry | `nearest(t)` lookup | slides to the tile whose timestamp matches the audio onset |
-| 8 | Pin / stamp | clip window | marks the contact frame; ±3 frames are kept for the slow-motion clip |
+| Step | Real component | What it does |
+|---|---|---|
+| 1 | `FrameRing<T>` | circular buffer of recent frames; the oldest are evicted and their `ImageBitmap` closed |
+| 2 | `AudioWorklet` input | streams audio at 48 kHz |
+| 3 | `classify()` in `onset-core.ts` | fires when band energy is 8x the running noise floor, then labels the hit **bat-sweet**, **bat-edge** or **pad-body** from a 20 ms window |
+| 4 | `nearest(t)` | returns the frame whose timestamp is closest to the spike; 3 frames either side are kept for the slow-motion clip |
 
 ```mermaid
 sequenceDiagram
@@ -371,10 +372,48 @@ flowchart LR
 
 ---
 
+### 4.11 Bowling report: swing and turn against a normal delivery
+
+*Files: `lib/physics/ballistics.ts` (`measureMovement`), `components/report/BowlingReport.tsx`*
+
+Each delivery is compared with a **normal ball**: the same release position and velocity flown with no swing and no spin. The difference is what the bowler added.
+
+| Measure | Meaning |
+|---|---|
+| Swing | sideways drift in the air, in cm, measured at the pitching point (max in flight also shown) |
+| Seam movement / turn | extra sideways movement after pitching, in cm and as a direction change in degrees |
+| Float / dip | how much fuller or shorter the ball landed than the normal ball |
+| Total at stumps | swing plus turn, signed; **away** means toward the batter's off side |
+
+The report draws top-down and side views of the real path against the dashed normal path, with a per-ball table. Pace bowlers' movement is labelled seam movement, spinners' turn.
+
+### 4.12 Bat swing and weight transfer
+
+*Files: `lib/cv/biomech.ts`, `components/report/BatSwing.tsx`*
+
+Per shot: bat speed (estimated from hand speed), attack angle, swing path, downswing time, swing arc, front-foot weight at contact, and head drift. The report plots bat speed against ball exit speed and weight transfer by length.
+
+### 4.13 Player DNA
+
+*Files: `lib/analytics/profile.ts`, `app/profile/page.tsx`*
+
+Built from every session stored on the device. Batting: archetype (withheld below 12 shots), scoring zones, strengths and weaknesses, technique mean and spread, strike rate against pace and spin, and a trend (needs 3 or more sessions). Bowling: stock ball, accuracy in the channel, swing and turn, release spread, fatigue. Confidence rises with the number of shots.
+
+### 4.14 Live ball tracking fit
+
+*Files: `lib/physics/trackfit.ts`, `lib/live/fit.worker.ts`*
+
+An 8-parameter fit (release position, velocity, swing, spin) to the tracked pixels, with a ridge prior, a boundary-value grid search and a two-stage Nelder-Mead, run in a Web Worker (about 3 s per ball). With one camera, swing and spin are partly confounded and magnitudes can be off by up to about 15 cm.
+
+### 4.15 Security
+
+See [SECURITY.md](SECURITY.md): allowlist reconstruction of all client data, same-origin checks, rate limits, size caps, strict headers, and self-hosting of the vision models.
+
 ## 5. Repository map
 
 ```
 app/                 Next.js routes: home, /session, /report/[id], /api/coach/*
+app/profile          Player DNA page
 components/          UI: Scoreboard, FieldRadar, SetupPanel, SimSession, LiveSession,
                      ReplayCanvas, CalibrationOverlay, TripodMode, report/*
 lib/audio/           onset detector (+ AudioWorklet source) and wrapper
@@ -384,7 +423,8 @@ lib/rules/           umpire (MCC), scoreboard, field engine, shot model
 lib/sim/             match simulator, virtual camera, synthetic poses, clips
 lib/live/            live pipeline + clip builder
 lib/coach/           digest, prompts, Gemini client, offline rules, speech
-lib/analytics/       aggregation for charts
+lib/analytics/       aggregation for charts, Player DNA (profile.ts)
+lib/security/        sanitizer, rate limit, same-origin checks
 lib/storage/         IndexedDB layer
 scripts/selfcheck.ts end-to-end self checks (npm test)
 docs/                figures, screenshots, video
@@ -405,18 +445,20 @@ Without a key the coach runs in offline mode.
 
 ## 7. Testing
 
-`npm test` runs `scripts/selfcheck.ts`: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
+`npm test` runs `scripts/selfcheck.ts` and `scripts/checks.ts` (61 assertions: movement vs normal delivery, Player DNA, sanitizer, rate limit). The first covers: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
 
 ## 8. Known limitations
 
 * **The live camera path has not been validated on real hardware.** It compiles and its maths is covered by synthetic tests; expect to tune thresholds on a real device.
 * **Monocular approximations.** One camera cannot measure depth directly; exit azimuth/elevation and speeds are estimates (see §4.6).
 * **Model names.** `gemini-4-hydrogen` and `gemini-4-carbon` follow the project specification; change them in `.env.local` if your account uses different IDs.
-* **Network assets.** The MediaPipe WASM and pose model load from a CDN by default; self-host them for fully offline use.
+* **Network assets.** The MediaPipe WASM and pose model load from a CDN by default; run `npm run vendor:models` and set `NEXT_PUBLIC_SELF_HOST_ONLY=1` to self-host.
+* **Swing and spin from one camera** are approximate (see 4.14). Bat speed is an estimate.
+* **Security trade-offs** (CSP `unsafe-inline`, in-memory rate limit) are listed in SECURITY.md.
 * **Audio.** Input latency differs per device; tune `audioOffsetMs`. The analyser fallback is about 12 ms precise.
 
 ## 9. Regenerating the figures and video
 
-* **Fig 1** was built with the [Anatomy skill](https://github.com/wheresryan22/anatomy): source in [`docs/figures/src/fig1-impact-sync-bench.build.mjs`](docs/figures/src/fig1-impact-sync-bench.build.mjs) (it needs the Anatomy kit to run). The numbered callouts were added on top of the rendered PNG.
+* **Fig 1** is plain HTML/SVG in `docs/figures/src/fig1-explainer.html`; screenshot it with headless Chrome. The stack diagram was built with the stack-diagram skill (`docs/figures/stack.html`).
 * **Screenshots** in `docs/screens` were captured from the production build with headless Chrome (simulator, 14 balls, then Finish).
 * **Video.** The [brag skill](https://github.com/latent-spaces/brag) is built on Hyperframes. The `/brag` skill itself was not available in this environment, so the film was composed directly with the Hyperframes CLI (HTML + GSAP): see [`docs/video/hyperframes-src`](docs/video/hyperframes-src). Render with `npx hyperframes render` from that folder (Node 22+, ffmpeg and Chrome required).
