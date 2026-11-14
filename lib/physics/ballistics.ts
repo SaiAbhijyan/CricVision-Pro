@@ -1,4 +1,4 @@
-import type { DeliveryFlight, FlightSample, Handedness, PitchSurface, Vec3, OutfieldSpeed } from "@/lib/types";
+import type { BallMovement, DeliveryFlight, FlightSample, Handedness, PitchSurface, Vec3, OutfieldSpeed } from "@/lib/types";
 import {
   AIR_RHO, BALL_AREA, BALL_MASS, BALL_RADIUS, CD, G, INERTIA_K, OUTFIELD, PITCH_LENGTH, PITCH_WIDTH,
   SURFACES, deg, toKph,
@@ -238,15 +238,76 @@ export function flightFromState(init: BallState, o: { surface: PitchSurface; swi
     postTurn = (post - pre) * offSign;
     bounceSpeed = toKph(Math.hypot(r.bounce.vIn.x, r.bounce.vIn.y, r.bounce.vIn.z));
   }
+  const movement = measureMovement(init, o, r, offSign) ?? undefined;
   return {
     samples: r.samples,
     bounce: r.bounce,
+    movement,
     atStumps: r.atPlane,
     releaseSpeedKph: toKph(speedMs),
     bounceSpeedKph: bounceSpeed,
     swingCm,
     postBounceTurnDeg: postTurn,
     bounceHeightAtStumpsCm: r.atPlane ? r.atPlane.p.z * 100 : 0,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Movement versus a normal delivery                                    */
+/* ------------------------------------------------------------------ */
+
+type Path = { x: number; y: number; z: number }[];
+const thin = (samples: FlightSample[], upToT: number, n = 40): Path => {
+  const s = samples.filter((q) => q.t <= upToT);
+  if (s.length <= n) return s.map((q) => ({ x: q.p.x, y: q.p.y, z: q.p.z }));
+  return Array.from({ length: n }, (_, i) => { const q = s[Math.round((i * (s.length - 1)) / (n - 1))]; return { x: q.p.x, y: q.p.y, z: q.p.z }; });
+};
+/** lateral x of a path at a given y (first crossing), linear interpolation */
+const xAtY = (samples: FlightSample[], y: number): number | null => {
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1].p, b = samples[i].p;
+    if ((a.y - y) * (b.y - y) <= 0 && a.y !== b.y) return a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x);
+  }
+  return null;
+};
+
+/**
+ * Fly the SAME release (position, velocity) with the spin removed and no seam swing: that is the "normal delivery".
+ * Anything the real ball does beyond it is swing (in the air), turn (off the pitch) or float/dip (spin changing length).
+ */
+function measureMovement(
+  init: BallState, o: { surface: PitchSurface; swingAccel: number; seamDir: number },
+  actual: ReturnType<typeof simulate>, offSign: number,
+): BallMovement | null {
+  if (!actual.bounce || !actual.atPlane) return null;
+  const base = simulate({ p: { ...init.p }, v: { ...init.v }, w: { x: 0, y: 0, z: 0 } }, {
+    surface: o.surface, swingAccel: 0, seamDir: 0, dt: 0.001, tMax: 2, stopAtY: PITCH_LENGTH,
+  });
+  if (!base.bounce || !base.atPlane) return null;
+  const yb = actual.bounce.p.y;
+  const xb0 = xAtY(base.samples, yb) ?? base.bounce.p.x;
+  const air = (actual.bounce.p.x - xb0) * offSign * 100;
+  let airMax = 0;
+  for (const s of actual.samples) {
+    if (s.t > actual.bounce.t) break;
+    const xb = xAtY(base.samples, s.p.y);
+    if (xb !== null) { const d = (s.p.x - xb) * offSign * 100; if (Math.abs(d) > Math.abs(airMax)) airMax = d; }
+  }
+  const total = (actual.atPlane.p.x - base.atPlane.p.x) * offSign * 100;
+  const turn = total - air;
+  const pre = Math.atan2(actual.bounce.vIn.x, actual.bounce.vIn.y);
+  const post = Math.atan2(actual.bounce.vOut.x, actual.bounce.vOut.y);
+  const preB = Math.atan2(base.bounce.vIn.x, base.bounce.vIn.y);
+  const postB = Math.atan2(base.bounce.vOut.x, base.bounce.vOut.y);
+  const turnDeg = (deg(post - pre) - deg(postB - preB)) * offSign;
+  return {
+    airSwingCm: air, airSwingMaxCm: airMax, turnCm: turn, totalMoveCm: total,
+    pitchShiftM: base.bounce.p.y - actual.bounce.p.y,
+    turnDeg,
+    swingType: Math.abs(airMax) < 1 ? "Straight" : airMax > 0 ? "Away" : "In",
+    turnType: Math.abs(turn) < 1.5 ? "Straight" : turn > 0 ? "Away" : "In",
+    actual: thin(actual.samples, actual.tEnd),
+    baseline: thin(base.samples, base.tEnd),
   };
 }
 

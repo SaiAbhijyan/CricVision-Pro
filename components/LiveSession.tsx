@@ -8,7 +8,8 @@ import { PoseTracker } from "@/lib/cv/pose";
 import { FrameRing } from "@/lib/cv/frame-ring";
 import type { Skeleton } from "@/lib/cv/skeleton";
 import { ImpactDetector, type ImpactEvent } from "@/lib/audio/transient";
-import { buildLiveBall, type TrackPt } from "@/lib/live/pipeline";
+import { buildLiveBall, fitObs, type TrackPt } from "@/lib/live/pipeline";
+import { fitInWorker } from "@/lib/live/fit-client";
 import { buildLiveClip } from "@/lib/live/clip";
 import { buildField, defaultFieldPreset, applyDisguiseScores } from "@/lib/sim/match-sim";
 import { applyOutcome, newScore, type ScoreState } from "@/lib/rules/scoreboard";
@@ -86,7 +87,9 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
       const pts: TrackPt[] = track.map((p) => ({ t: p.t, x: p.x / scale, y: p.y / scale }));
       const win = (a: Skeleton[]) => a.filter((s) => s.t >= tStart - 2.5 && s.t <= tEnd + 0.3);
       const hit = impacts.current.filter((e) => e.tPerf >= tStart - 0.1 && e.tPerf <= tEnd + 0.4).sort((a, b) => b.peak - a.peak)[0] ?? null;
-      const res = buildLiveBall({ cfg, cam: model, field: fieldRef.current, score: scoreRef.current, index: balls.current.length, startedAt: Date.now(), bowlerFrames: win(bowler), batterFrames: win(batter), track: pts, impact: hit });
+      const obs = fitObs({ track: pts, impact: hit });
+      const fit = obs ? await fitInWorker(model, obs, cfg.surface) : null;
+      const res = buildLiveBall({ fit, cfg, cam: model, field: fieldRef.current, score: scoreRef.current, index: balls.current.length, startedAt: Date.now(), bowlerFrames: win(bowler), batterFrames: win(batter), track: pts, impact: hit });
       trk.reset(); track = []; impacts.current = [];
       if (!res) { setStatus("Delivery seen but the ball track was too short to analyse."); busy = false; return; }
       const r = res.record; balls.current.push(r);

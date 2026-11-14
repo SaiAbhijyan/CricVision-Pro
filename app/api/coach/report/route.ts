@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import type { CoachReport, SessionSummary } from "@/lib/types";
+import type { CoachReport } from "@/lib/types";
+import { JSON_HEADERS, assertSameOrigin, rateLimit, readJson } from "@/lib/security/request";
+import { sanitizeSession } from "@/lib/security/sanitize";
 import { generate, geminiConfig } from "@/lib/coach/gemini";
 import { sessionDigest } from "@/lib/coach/digest";
 import { REPORT_SYSTEM, reportUser } from "@/lib/coach/prompts";
@@ -21,16 +23,18 @@ function validate(j: unknown): Omit<CoachReport, "source"> | null {
 }
 
 export async function POST(req: Request) {
-  let s: SessionSummary;
-  try { s = await req.json(); if (!s?.balls) throw 0; } catch { return NextResponse.json({ error: "bad request" }, { status: 400 }); }
+  const bad = assertSameOrigin(req) ?? rateLimit(req, "report", 6, 0.05);
+  if (bad) return bad;
+  const s = sanitizeSession(await readJson(req, 900_000));
+  if (!s) return NextResponse.json({ error: "bad request" }, { status: 400, headers: JSON_HEADERS });
   const c = geminiConfig();
-  if (!c.key) return NextResponse.json(offlineReport(s));
+  if (!c.key) return NextResponse.json(offlineReport(s), { headers: JSON_HEADERS });
   try {
     const raw = await generate({ model: c.reportModel, system: REPORT_SYSTEM, user: reportUser(sessionDigest(s)), json: true, maxTokens: 2500, thinkingLevel: "high", timeoutMs: 45000 });
     const parsed = validate(JSON.parse(raw.replace(/^```json\s*|\s*```$/g, "")));
     if (!parsed) throw new Error("schema");
-    return NextResponse.json({ source: "gemini-4-carbon", ...parsed } satisfies CoachReport);
+    return NextResponse.json({ source: "gemini-4-carbon", ...parsed } satisfies CoachReport, { headers: JSON_HEADERS });
   } catch {
-    return NextResponse.json(offlineReport(s));
+    return NextResponse.json(offlineReport(s), { headers: JSON_HEADERS });
   }
 }

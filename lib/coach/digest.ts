@@ -15,7 +15,9 @@ export function ballDigest(b: BallRecord) {
     bat: b.batting && {
       frontFootPct: r1(b.batting.frontFootPct), headDriftCm: r1(b.batting.headDriftCm), strideCm: r1(b.batting.strideCm),
       triggerMs: r1(b.batting.triggerMs), backliftDeg: r1(b.batting.backliftDeg), bottomHandPct: r1(b.batting.bottomHandPct),
+      batKph: r1(b.batting.batSpeedKph), attackDeg: r1(b.batting.attackAngleDeg), pathDeg: r1(b.batting.swingPathDeg),
     },
+    move: b.movement && { airSwingCm: r1(b.movement.airSwingCm), turnCm: r1(b.movement.turnCm), floatM: r1(b.movement.pitchShiftM), swing: b.movement.swingType, turn: b.movement.turnType },
     flags: b.flags,
   };
 }

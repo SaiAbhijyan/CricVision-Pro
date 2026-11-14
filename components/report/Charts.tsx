@@ -5,7 +5,7 @@ import { batSeries, beehive, pitchMap, releaseSlots, stressCurve, timingByLength
 import { PITCH_LENGTH } from "@/lib/physics/constants";
 
 const T = { fill: "#ffffff99", fontSize: 11 };
-const Box = ({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) => (
+export const Box = ({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) => (
   <div className="card break-inside-avoid"><h3 className="font-bold">{title}</h3>{note && <p className="mb-2 text-xs text-white/50">{note}</p>}<div className="h-64">{children}</div></div>
 );
 const ax = { stroke: "#ffffff33", tick: T };

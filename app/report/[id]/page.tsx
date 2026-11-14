@@ -7,6 +7,8 @@ import { fetchReport } from "@/lib/coach/client";
 import { sessionStats } from "@/lib/analytics/aggregate";
 import ExecutiveDebrief from "@/components/report/ExecutiveDebrief";
 import ReplayReel from "@/components/report/ReplayReel";
+import BowlingReport from "@/components/report/BowlingReport";
+import BatSwing from "@/components/report/BatSwing";
 import { Beehive, FootworkWrist, PitchMap, ReleaseScatter, StressCurve, TimingMatrix, WagonWheel, WeightVsDrift } from "@/components/report/Charts";
 
 export default function ReportPage() {
@@ -47,6 +49,8 @@ export default function ReportPage() {
       </div>
       {rep ? <ExecutiveDebrief r={rep} /> : <div className="card text-sm text-white/60">Writing your dossier…</div>}
       <ReplayReel clips={clips} />
+      {hasBowl && <BowlingReport balls={s.balls} style={s.config.bowlerStyle} />}
+      {hasBat && <BatSwing balls={s.balls} />}
       <div className="grid gap-4 md:grid-cols-2">
         {hasBat && <><WeightVsDrift balls={s.balls} /><FootworkWrist balls={s.balls} /><TimingMatrix balls={s.balls} /><WagonWheel balls={s.balls} /></>}
         {hasBowl && <><PitchMap balls={s.balls} /><Beehive balls={s.balls} /><ReleaseScatter balls={s.balls} /><StressCurve balls={s.balls} /></>}

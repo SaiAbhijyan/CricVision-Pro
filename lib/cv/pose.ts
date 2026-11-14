@@ -27,11 +27,21 @@ export class PoseTracker {
   constructor(private cam: CameraModel, private opts: PoseOptions = {}) { this.corridor = pitchCorridor(cam, 1.2, 4); }
   setCamera(cam: CameraModel) { this.cam = cam; this.corridor = pitchCorridor(cam, 1.2, 4); }
 
+  /** Prefer the self-hosted runtime and model (npm run vendor:models); fall back to the public CDN unless self-host-only. */
+  private async resolveAssets(): Promise<{ wasm: string; model: string }> {
+    const has = async (u: string) => { try { return (await fetch(u, { method: "HEAD" })).ok; } catch { return false; } };
+    const wasm = this.opts.wasmBase ?? ((await has("/mediapipe/wasm/vision_wasm_internal.wasm")) ? "/mediapipe/wasm" : null);
+    const model = this.opts.modelUrl ?? ((await has("/models/pose_landmarker_lite.task")) ? "/models/pose_landmarker_lite.task" : null);
+    if ((!wasm || !model) && process.env.NEXT_PUBLIC_SELF_HOST_ONLY === "1") throw new Error("Self-host-only mode: run `npm run vendor:models` to install the pose model locally.");
+    return { wasm: wasm ?? DEFAULTS.wasmBase, model: model ?? DEFAULTS.modelUrl };
+  }
+
   async init() {
     const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
-    const fileset = await FilesetResolver.forVisionTasks(this.opts.wasmBase ?? DEFAULTS.wasmBase);
+    const assets = await this.resolveAssets();
+    const fileset = await FilesetResolver.forVisionTasks(assets.wasm);
     this.lm = await PoseLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: this.opts.modelUrl ?? DEFAULTS.modelUrl, delegate: this.opts.delegate ?? "GPU" },
+      baseOptions: { modelAssetPath: assets.model, delegate: this.opts.delegate ?? "GPU" },
       runningMode: "VIDEO", numPoses: this.opts.numPoses ?? 4,
       minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5,
     });

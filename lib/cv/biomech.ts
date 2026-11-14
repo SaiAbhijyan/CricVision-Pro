@@ -193,6 +193,25 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   const w0 = nearestIdx(fr, fr[imp].t - 0.08), w1 = Math.min(n - 2, nearestIdx(fr, fr[imp].t + 0.08));
   for (let i = Math.max(1, w0); i <= w1; i++) snap = Math.max(snap, Math.abs(flex(i + 1) - flex(i - 1)) / dtAt(fr, i));
 
+  // ---- bat swing: path of the hands from the top of the backlift to contact ----
+  const hands = (i: number) => mid(fr[i].j.lWr, fr[i].j.rWr);
+  let arc = 0;
+  for (let i = bl + 1; i <= imp; i++) arc += len(sub(hands(i), hands(i - 1)));
+  const hv = (i: number) => {
+    const i0 = Math.max(0, i - 2), i1 = Math.min(n - 1, i + 2);
+    const a = hands(i0), b = hands(i1);
+    const dt = Math.max(1e-4, fr[i1].t - fr[i0].t);
+    return { x: (b.x - a.x) / dt, y: (b.y - a.y) / dt, z: (b.z - a.z) / dt };
+  };
+  let peakHand = 0;
+  for (let i = Math.max(bl, imp - 3); i <= Math.min(n - 1, imp + 1); i++) { const v = hv(i); peakHand = Math.max(peakHand, Math.hypot(v.x, v.y, v.z)); }
+  const vImp = hv(imp);
+  const hSpeed = Math.hypot(vImp.x, vImp.y);
+  const attack = deg(Math.atan2(vImp.z, Math.max(1e-6, hSpeed)));
+  const path = deg(Math.atan2(vImp.x, Math.max(1e-6, -vImp.y)));
+  const batSpeedKph = clamp((3.0 * peakHand + ((snap * Math.PI) / 180) * 0.65) * 3.6, 0, 170);
+  const downMs = Math.max(0, (fr[imp].t - fr[bl].t) * 1000);
+
   const hb = mid(fr[bl].j.lWr, fr[bl].j.rWr), hi = mid(fr[imp].j.lWr, fr[imp].j.rWr);
   const d = sub(hi, hb);
   const plane = deg(Math.atan2(horiz(d), Math.max(1e-6, -d.z)));
@@ -203,6 +222,7 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
     biomech: {
       frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, backliftDeg: backlift,
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
+      batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
     },
   };
 }

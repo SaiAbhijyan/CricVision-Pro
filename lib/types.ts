@@ -81,6 +81,33 @@ export interface DeliveryFlight {
   swingCm: number;          // max lateral deviation from straight release->bounce chord (pre-bounce)
   postBounceTurnDeg: number; // signed, + toward off side (wrt handedness)
   bounceHeightAtStumpsCm: number;
+  /** how the real delivery differs from a plain (no swing, no spin) ball released identically */
+  movement?: BallMovement;
+}
+
+/**
+ * Movement versus the "normal delivery": the same release point, speed and launch angle flown with no seam swing and
+ * no spin. Lateral numbers are signed from the batter's point of view: + = toward the off side (away from a
+ * right-hander's body for RHB, mirrored for LHB).
+ */
+export interface BallMovement {
+  /** sideways deviation in the air (swing + drift), measured at the pitching point, cm */
+  airSwingCm: number;
+  /** largest sideways deviation reached before the bounce, cm */
+  airSwingMaxCm: number;
+  /** extra sideways deviation gained off the pitch (spin / seam), cm: total at the stumps minus air swing */
+  turnCm: number;
+  /** total lateral difference at the stump plane, cm */
+  totalMoveCm: number;
+  /** distance (m) the ball pitched shorter (+) or fuller (-) than the plain ball: float / dip from spin */
+  pitchShiftM: number;
+  /** net off-the-pitch direction change, degrees (same sign convention as lateral numbers) */
+  turnDeg: number;
+  swingType: "Away" | "In" | "Straight";
+  turnType: "Away" | "In" | "Straight";
+  /** ~40-point paths (x,y,z m) for drawing the real delivery against the plain one */
+  actual: { x: number; y: number; z: number }[];
+  baseline: { x: number; y: number; z: number }[];
 }
 
 export type LengthClass = "Yorker" | "Full" | "Good" | "Short";
@@ -121,6 +148,16 @@ export interface BattingBiomech {
   wristSnapDegS: number;
   swingPlaneDeg: number;
   swingDetected: boolean;
+  /** estimated bat-head speed at contact (about 3x the hands' speed, a pendulum lever, plus wrist release over 0.65 m), km/h */
+  batSpeedKph: number;
+  /** vertical angle of the hands' path at contact: + = upward (lofting), - = downward */
+  attackAngleDeg: number;
+  /** horizontal direction of the hands' path at contact vs the line of the ball: + = across to leg, - = across to off */
+  swingPathDeg: number;
+  /** time from top of the backlift to contact, ms */
+  downswingMs: number;
+  /** length of the hands' path from top of backlift to contact, cm */
+  swingArcCm: number;
 }
 
 export type TimingClass = "Early" | "Middle / Sweet Spot" | "Late" | "Edge" | "Pad/Miss";
@@ -177,6 +214,8 @@ export interface BallRecord {
   bounceSpeedKph: number | null;
   swingCm: number | null;
   turnDeg: number | null;
+  /** swing / spin compared with a normal delivery (null when no flight was solved) */
+  movement: BallMovement | null;
   bounceHeightCm: number | null;
   stumpArrival: { x: number; z: number } | null;
   bowling: BowlingBiomech | null;

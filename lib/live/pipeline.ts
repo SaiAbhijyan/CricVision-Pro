@@ -9,7 +9,7 @@
 import type { BallRecord, BattingBiomech, BowlingBiomech, CameraModel, DismissalKind, ExtraKind, FieldPlayer, SessionConfig, ShotBallistics, Vec3 } from "@/lib/types";
 import { BATTER_CREASE_Y, PITCH_LENGTH, clamp, lerp, toKph } from "@/lib/physics/constants";
 import { flightFromState, simulateShot } from "@/lib/physics/ballistics";
-import { fitFlightTo2D } from "@/lib/physics/trackfit";
+import { fitFlightTo2D, type FitResult, type TrackObs } from "@/lib/physics/trackfit";
 import { unprojectAtHeight } from "@/lib/physics/homography";
 import { extractBatting, extractBowling } from "@/lib/cv/biomech";
 import type { Skeleton } from "@/lib/cv/skeleton";
@@ -20,7 +20,16 @@ import type { ScoreState, WagonPoint } from "@/lib/rules/scoreboard";
 import type { ImpactEvent } from "@/lib/audio/transient";
 
 export interface TrackPt { t: number; x: number; y: number }   // t = performance seconds, x/y = full-resolution pixels
+/** Observations the 3-D fit uses: the ball track up to the audio impact. Lets the caller run the (slow) fit in a Worker. */
+export function fitObs(i: { track: TrackPt[]; impact: ImpactEvent | null }): TrackObs[] | null {
+  const t0 = i.track[0]?.t ?? 0;
+  const pre = i.track.filter((p) => !i.impact || p.t < i.impact.tPerf - 0.002);
+  return pre.length < 5 ? null : pre.map((p) => ({ t: p.t - t0, px: { x: p.x, y: p.y } }));
+}
+
 export interface LiveBallInput {
+  /** pre-computed 3-D fit (from the worker); when undefined the fit is computed inline */
+  fit?: FitResult | null;
   cfg: SessionConfig; cam: CameraModel; field: FieldPlayer[]; score: ScoreState; index: number; startedAt: number;
   bowlerFrames: Skeleton[]; batterFrames: Skeleton[]; track: TrackPt[]; impact: ImpactEvent | null;
 }
@@ -32,11 +41,11 @@ export function buildLiveBall(i: LiveBallInput): LiveBallResult | null {
   const spin = cfg.bowlerStyle === "Off-Spin" || cfg.bowlerStyle === "Leg-Spin";
   const imp = i.impact;
   const t0 = i.track[0]?.t ?? 0;
-  const pre = i.track.filter((p) => !imp || p.t < imp.tPerf - 0.002);
-  if (pre.length < 5) return null;
-  const fit = fitFlightTo2D(cam, pre.map((p) => ({ t: p.t - t0, px: { x: p.x, y: p.y } })), cfg.surface);
+  const obs = fitObs(i);
+  if (!obs) return null;
+  const fit = i.fit !== undefined ? i.fit : fitFlightTo2D(cam, obs, cfg.surface);
   if (!fit) return null;
-  const flight = flightFromState({ p: fit.release, v: fit.velocity, w: { x: 0, y: 0, z: 0 } }, { surface: cfg.surface, swingAccel: 0, seamDir: 0 }, fit.release, fit.speedMs, cfg.handedness);
+  const flight = flightFromState({ p: fit.release, v: fit.velocity, w: { x: 0, y: (fit.turnRpm * 2 * Math.PI) / 60, z: 0 } }, { surface: cfg.surface, swingAccel: fit.swingAccel, seamDir: 0 }, fit.release, fit.speedMs, cfg.handedness);
   const bounce = flight.bounce;
   const length = bounce ? classifyLength(PITCH_LENGTH - bounce.p.y) : null;
   const line = bounce ? classifyLine(bounce.p.x, cfg.handedness) : null;
@@ -117,7 +126,7 @@ export function buildLiveBall(i: LiveBallInput): LiveBallResult | null {
   const record: BallRecord = {
     id: `b${i.index + 1}`, index: i.index + 1, over: Math.floor(score.legalBalls / 6), ballInOver: (score.legalBalls % 6) + 1, timeMs: i.startedAt,
     length, line, bounceYFromBatter: bounce ? PITCH_LENGTH - bounce.p.y : null, bounceX: bounce ? bounce.p.x : null,
-    speedKph: flight.releaseSpeedKph, bounceSpeedKph: flight.bounceSpeedKph || null, swingCm: flight.swingCm, turnDeg: flight.postBounceTurnDeg,
+    speedKph: flight.releaseSpeedKph, bounceSpeedKph: flight.bounceSpeedKph || null, swingCm: flight.swingCm, turnDeg: flight.postBounceTurnDeg, movement: flight.movement ?? null,
     bounceHeightCm: flight.bounceHeightAtStumpsCm, stumpArrival: flight.atStumps ? { x: flight.atStumps.p.x * os * os, z: flight.atStumps.p.z } : null,
     bowling: bio, batting: batBio, timing, shot, ballistics,
     outcome: { runs, extraRuns, extra, legal, wicket, boundary, freeHitNext: ex.noBall || cfg.format === "Net Free-Hit", notes, lbw, shotPath, fielderId: undefined },

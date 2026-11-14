@@ -175,7 +175,7 @@ export function simulateBall(ctx: Ctx): SimBall {
     backRpm: spin ? 700 : 900,
     turnRpm: style === "Off-Spin" ? -1500 * flip - between(rng, 0, 400) : style === "Leg-Spin" ? 1400 * flip + between(rng, 0, 400) : 0,
     driftRpm: style === "Off-Spin" ? -450 * flip : style === "Leg-Spin" ? 450 * flip : 0,
-    swingAccel: spin ? 0 : (cfg.surface === "Green/Seam" ? 2.6 : cfg.surface === "Astro-Turf" ? 0.8 : 1.4) * between(rng, -2, 2.2),
+    swingAccel: spin ? 0 : (cfg.surface === "Green/Seam" ? 1.5 : cfg.surface === "Astro-Turf" ? 0.5 : 0.9) * between(rng, -2, 2.2),
     seamDir: between(rng, -1, 1),
     surface: spec,
   };
@@ -212,7 +212,10 @@ export function simulateBall(ctx: Ctx): SimBall {
   const batterFrames = generateBatter(bat);
   const bx2 = extractBatting(batterFrames, { hand: cfg.handedness, impactT: tC });
   let batBio: BattingBiomech | null = bx2 ? bx2.biomech : null;
-  if (batBio && !swing) batBio = { ...batBio, swingDetected: false };
+  if (batBio && !swing) batBio = { ...batBio, swingDetected: false, batSpeedKph: 0, attackAngleDeg: 0, swingArcCm: 0 };
+  // The synthetic skeleton cannot move as fast as a real batter, so the simulator reports the bat speed and attack
+  // angle it actually used in the bat-ball collision (the live path estimates both from the pose stream instead).
+  if (batBio && swing) batBio = { ...batBio, batSpeedKph: plan.bat * 3.6, attackAngleDeg: clamp(plan.el * 0.55 - 3 + gauss(rng) * 2, -15, 35) };
 
   /* ---------- extras & pad ---------- */
   let padFirst = false;
@@ -345,7 +348,7 @@ export function simulateBall(ctx: Ctx): SimBall {
     length, line,
     bounceYFromBatter: yFromBatter, bounceX: bounce ? bounce.p.x : null,
     speedKph: flight.releaseSpeedKph, bounceSpeedKph: flight.bounceSpeedKph || null,
-    swingCm: flight.swingCm, turnDeg: flight.postBounceTurnDeg, bounceHeightCm: flight.bounceHeightAtStumpsCm,
+    swingCm: flight.swingCm, turnDeg: flight.postBounceTurnDeg, movement: flight.movement ?? null, bounceHeightCm: flight.bounceHeightAtStumpsCm,
     stumpArrival: flight.atStumps ? { x: flight.atStumps.p.x, z: flight.atStumps.p.z } : null,
     bowling: mode === "Batting Focus" ? null : bio,
     batting: mode === "Bowling Focus" ? null : batBio,

@@ -4,6 +4,13 @@ import { speak } from "./speech";
 
 const LIVE_BUDGET_MS = 1400;
 
+/** Drop heavy drawing data (3-D paths, shot paths) before anything leaves the device: the coach only needs the numbers. */
+const lean = (b: BallRecord): BallRecord => ({
+  ...b,
+  movement: b.movement ? { ...b.movement, actual: [], baseline: [] } : null,
+  outcome: { ...b.outcome, shotPath: undefined },
+});
+
 /** Live cue: tries the server route under a hard 1.4 s budget, falls back to the offline rules. */
 export async function liveCoach(ball: BallRecord, history: string[], opts: { speak?: boolean } = {}): Promise<{ text: string; source: "gemini-4-hydrogen" | "offline-rules"; ms: number }> {
   const t0 = performance.now();
@@ -11,7 +18,7 @@ export async function liveCoach(ball: BallRecord, history: string[], opts: { spe
   try {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), LIVE_BUDGET_MS);
-    const res = await fetch("/api/coach/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ball, history }), signal: ctl.signal });
+    const res = await fetch("/api/coach/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ball: lean(ball), history }), signal: ctl.signal });
     clearTimeout(timer);
     if (res.ok) { const j = await res.json(); if (j.text && j.source === "gemini-4-hydrogen") { text = j.text; source = j.source; } }
   } catch { /* budget exceeded or offline */ }
@@ -22,7 +29,7 @@ export async function liveCoach(ball: BallRecord, history: string[], opts: { spe
 
 export async function fetchReport(s: SessionSummary): Promise<CoachReport> {
   try {
-    const res = await fetch("/api/coach/report", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(s) });
+    const res = await fetch("/api/coach/report", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...s, balls: s.balls.map(lean) }) });
     if (res.ok) return (await res.json()) as CoachReport;
   } catch { /* fall through */ }
   return offlineReport(s);
