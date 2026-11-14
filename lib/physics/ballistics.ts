@@ -215,16 +215,18 @@ export function solveLaunch(d: DeliverySpec): { az: number; el: number; err: num
 
 export function simulateDelivery(d: DeliverySpec, hand: Handedness, launch?: { az: number; el: number }): DeliveryFlight {
   const L = launch ?? solveLaunch(d);
-  const init = launchState(d, L.az, L.el);
-  const r = simulate(init, {
-    surface: d.surface, swingAccel: d.swingAccel, seamDir: d.seamDir, dt: 0.001, tMax: 2, stopAtY: PITCH_LENGTH,
-  });
+  return flightFromState(launchState(d, L.az, L.el), { surface: d.surface, swingAccel: d.swingAccel, seamDir: d.seamDir }, d.release, d.speedMs, hand);
+}
+
+/** Integrate a delivery from an arbitrary initial state (used by the synthetic simulator and by the live 2D-track fit). */
+export function flightFromState(init: BallState, o: { surface: PitchSurface; swingAccel: number; seamDir: number }, release: Vec3, speedMs: number, hand: Handedness): DeliveryFlight {
+  const r = simulate(init, { surface: o.surface, swingAccel: o.swingAccel, seamDir: o.seamDir, dt: 0.001, tMax: 2, stopAtY: PITCH_LENGTH });
   const offSign = hand === "RHB" ? 1 : -1;
   let swingCm = 0;
   let postTurn = 0;
   let bounceSpeed = 0;
   if (r.bounce) {
-    const a = d.release, b = r.bounce.p;
+    const a = release, b = r.bounce.p;
     for (const s of r.samples) {
       if (s.t > r.bounce.t) break;
       const f = (s.p.y - a.y) / (b.y - a.y || 1e-9);
@@ -240,7 +242,7 @@ export function simulateDelivery(d: DeliverySpec, hand: Handedness, launch?: { a
     samples: r.samples,
     bounce: r.bounce,
     atStumps: r.atPlane,
-    releaseSpeedKph: toKph(d.speedMs),
+    releaseSpeedKph: toKph(speedMs),
     bounceSpeedKph: bounceSpeed,
     swingCm,
     postBounceTurnDeg: postTurn,

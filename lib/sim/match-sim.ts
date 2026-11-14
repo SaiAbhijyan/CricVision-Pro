@@ -57,7 +57,7 @@ export function buildField(cfg: SessionConfig, preset: PresetName): FieldPlayer[
   return f.map((p) => (p.keeper ? { ...p, y: PITCH_LENGTH + (isSpin(cfg.bowlerStyle) ? 1.2 : 13) } : p));
 }
 
-interface Ctx { cfg: SessionConfig; field: FieldPlayer[]; rng: Rng; score: ScoreState; index: number; total: number; skill: number; startedAt: number }
+export interface Ctx { cfg: SessionConfig; field: FieldPlayer[]; rng: Rng; score: ScoreState; index: number; total: number; skill: number; startedAt: number }
 
 /* ----------------------------------------- bowling plan ----------------------------------------- */
 
@@ -355,6 +355,20 @@ export function simulateBall(ctx: Ctx): SimBall {
   return { record, flight, shot: shotRes, bowlerFrames, batterFrames, contactT: contact ? tC : null, contactPos };
 }
 
+/** Play one delivery and fold it into the running score. Shared by the batch simulator and the interactive session. */
+export function advance(ctx: Ctx): { ball: SimBall; score: ScoreState } {
+  const b = simulateBall(ctx);
+  const sh = b.shot, cp = b.contactPos;
+  const end = sh && cp ? (sh.crossing?.p ?? sh.rest?.p ?? sh.samples[sh.samples.length - 1].p) : null;
+  const wagon: WagonPoint | undefined = sh && cp && end && b.record.ballistics ? {
+    azimuthDeg: b.record.ballistics.horizontalAngleDeg, runs: b.record.outcome.boundary ?? b.record.outcome.runs,
+    boundary: b.record.outcome.boundary, distance: Math.hypot(end.x - cp.x, end.y - cp.y),
+  } : undefined;
+  const score = applyOutcome(ctx.score, b.record.outcome, wagon);
+  if (b.record.length === "Short" && b.flight.atStumps && b.flight.atStumps.p.z > ctx.cfg.batterShoulder) score.bouncersThisOver += 1;
+  return { ball: b, score };
+}
+
 export interface SimSession { balls: SimBall[]; score: ScoreState; field: FieldPlayer[] }
 
 export function simulateSession(o: SimOptions): SimSession {
@@ -363,18 +377,10 @@ export function simulateSession(o: SimOptions): SimSession {
   let score = newScore(o.cfg.format);
   const balls: SimBall[] = [];
   for (let i = 0; i < o.balls && !score.inningsOver; i++) {
-    const b = simulateBall({ cfg: o.cfg, field, rng, score, index: i, total: o.balls, skill: o.batterSkill ?? 0.65, startedAt: o.startedAt ?? Date.now() });
-    const wag = b.record.outcome.boundary || b.record.outcome.runs || b.shot ? undefined : undefined;
-    void wag;
-    score = applyOutcome(score, b.record.outcome, b.shot && b.contactPos ? {
-      azimuthDeg: b.record.ballistics!.horizontalAngleDeg, runs: b.record.outcome.boundary ?? b.record.outcome.runs, boundary: b.record.outcome.boundary,
-      distance: Math.hypot((b.shot.crossing?.p ?? b.shot.rest?.p ?? b.shot.samples[b.shot.samples.length - 1].p).x - b.contactPos.x, (b.shot.crossing?.p ?? b.shot.rest?.p ?? b.shot.samples[b.shot.samples.length - 1].p).y - b.contactPos.y),
-    } : undefined);
-    if (b.record.outcome.legal && b.record.ballInOver === 6) score.bouncersThisOver = 0;
-    if (b.record.length === "Short" && b.flight.atStumps && b.flight.atStumps.p.z > o.cfg.batterShoulder) score.bouncersThisOver += 1;
-    balls.push(b);
+    const r = advance({ cfg: o.cfg, field, rng, score, index: i, total: o.balls, skill: o.batterSkill ?? 0.65, startedAt: o.startedAt ?? Date.now() });
+    score = r.score;
+    balls.push(r.ball);
   }
   applyDisguiseScores(balls.map((b) => b.record));
-  void mean;
   return { balls, score, field };
 }
