@@ -1,79 +1,123 @@
 <!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=1920, height=1080"/>
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+<script src="lib/gsap.min.js"></script>
 <style>
-:root{--ground:#07110c;--ink:#eaf6ee;--lime:#b6ff3c;--cyan:#6ee7ff;--mut:#7fa08c}
+:root{--ink:#eef6f1;--lime:#b6ff3c;--cyan:#6ee7ff;--amb:#ffb347;--mut:#9db3a6}
 *{margin:0;padding:0;box-sizing:border-box}
-html,body{width:1920px;height:1080px;overflow:hidden;background:var(--ground);font-family:Inter,Helvetica,Arial,sans-serif;color:var(--ink)}
-#root{position:relative;width:1920px;height:1080px}
-.scene{position:absolute;inset:0;background:var(--ground)}
-h1{font-size:120px;letter-spacing:-.03em;font-weight:700}
-h2{font-size:64px;letter-spacing:-.02em;font-weight:700}
-.sub{font-size:34px;color:var(--mut)}
-.lime{color:var(--lime)}
-.center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;text-align:center}
-.shot{position:absolute;border:2px solid #ffffff22;border-radius:14px;box-shadow:0 30px 90px #000a}
-.head{position:absolute;left:90px;top:70px;width:560px}
-.head h2{margin-bottom:20px} .head p{font-size:30px;line-height:1.4;color:var(--mut)}
-.cap{position:absolute;left:90px;bottom:90px;width:1740px;font-size:44px;font-weight:600;opacity:0;color:var(--ink)}
-.cap b{color:var(--lime)}
-.flow{position:absolute;left:0;top:300px;width:1920px;display:flex;justify-content:center;gap:26px;align-items:center}
-.node{width:260px;height:230px;border:2px solid #b6ff3c66;border-radius:18px;background:#0c1d14;padding:26px;opacity:0}
-.node h3{font-size:32px;color:var(--lime);margin-bottom:12px} .node p{font-size:23px;line-height:1.35;color:var(--mut)}
-.arrow{font-size:56px;color:var(--lime);opacity:0}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#03060a;font-family:Inter,Helvetica,Arial,sans-serif;color:var(--ink)}
+#root{position:relative;width:1920px;height:1080px;overflow:hidden}
+#gl{position:absolute;inset:0;width:1920px;height:1080px}
+.vig{position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 55%,#000a 100%);pointer-events:none}
+.bars{position:absolute;left:0;width:1920px;height:0;background:#000}
+.t{position:absolute;opacity:0;font-weight:700;letter-spacing:-.02em;white-space:nowrap}
+.hero{font-size:132px;line-height:1.02}
+.lab{font-size:34px;font-weight:600;color:var(--mut);letter-spacing:.02em;text-transform:uppercase}
+.num{font-size:96px;font-weight:700;letter-spacing:-.03em}
+.lime{color:var(--lime)}.cyan{color:var(--cyan)}.amb{color:var(--amb)}
+.hud{position:absolute;opacity:0;border-left:4px solid var(--lime);padding:4px 0 4px 22px}
+.hud .n{font-size:84px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.hud .l{font-size:28px;font-weight:600;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-top:6px}
+.shot{position:absolute;border-radius:18px;box-shadow:0 40px 120px #000c,0 0 0 2px #ffffff22;opacity:0}
+.flash{position:absolute;inset:0;background:#fff;opacity:0}
+
+.scn{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#04080b}
+.z{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0}
+.cap{position:absolute;left:110px;bottom:84px;opacity:0;max-width:1100px}
+.cap .k{font-size:26px;font-weight:700;letter-spacing:.16em;color:var(--lime);text-transform:uppercase}
+.cap .v{font-size:56px;font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-top:8px;text-shadow:0 4px 30px #000}
+.chip{position:absolute;opacity:0;border-left:4px solid var(--lime);padding:8px 22px 8px 18px;background:#050a0cdd;border-radius:0 10px 10px 0}
+.chip .n{font-size:64px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.chip .l{font-size:24px;font-weight:600;color:var(--mut);letter-spacing:.08em;text-transform:uppercase;margin-top:4px}
+.card{position:absolute;border-radius:14px;box-shadow:0 30px 90px #000c,0 0 0 2px #ffffff1c}
+.dim{position:absolute;inset:0;background:#02060a;opacity:.55}
 </style></head><body>
-<div id="root" data-composition-id="main" data-start="0" data-duration="44" data-width="1920" data-height="1080">
-
-<div class="scene center clip" id="s1" data-start="0" data-duration="5" data-track-index="0">
-  <h1>CricVision <span class="lime">Pro</span></h1>
-  <div class="sub" id="s1sub">An on-device AI cricket coach, match simulator and analytics suite</div>
+<div id="root" data-composition-id="main" data-start="0" data-duration="115.5" data-width="1920" data-height="1080">
+<video id="v1" class="clip" src="assets/starc.mp4" muted playsinline data-start="0" data-duration="13" data-track-index="1" style="position:absolute;left:0;top:0;width:1920px;height:1080px"></video>
+<video id="v2" class="clip" src="assets/kohli.mp4" muted playsinline data-start="12.6" data-duration="8" data-track-index="2" style="position:absolute;left:0;top:0;width:1920px;height:1080px;opacity:0"></video>
+<div id="grad" style="position:absolute;left:0;top:560px;width:1920px;height:520px;background:linear-gradient(transparent,#000d);opacity:0"></div>
+<div id="blk" style="position:absolute;inset:0;background:radial-gradient(ellipse at 70% 50%,#0d2a14 0%,#04080b 70%);opacity:0"></div>
+<div class="t hero" id="c1" style="left:130px;top:790px;font-size:84px">We all had those days.</div>
+<div class="t hero" id="c2" style="left:130px;top:790px;font-size:70px;font-weight:600">Running in to bowl like the players we admired.</div>
+<div class="t hero" id="c3" style="left:130px;top:760px;font-size:70px;font-weight:600">And batting with the grace and<br>elegance of the legends.</div>
+<div class="t hero" id="c4" style="left:130px;top:340px;font-size:104px">We copied their styles.<br>We learned.<br><span class="lime">We chased the pros.</span></div>
+<div class="t hero" id="p1" style="left:130px;top:360px;font-size:104px">Now it&rsquo;s a click away.<br><span class="lime">In your palm.</span></div>
+<div id="phone" style="position:absolute;left:1180px;top:40px;width:470px;height:1000px;border-radius:64px;border:10px solid #151a1e;background:#05080a;overflow:hidden;opacity:0;box-shadow:0 60px 140px #000d,0 0 0 2px #ffffff1f,0 0 120px #b6ff3c22"><video id="vP" class="clip" src="assets/phone.mp4" muted playsinline data-start="25.6" data-duration="5.2" style="position:absolute;left:0;top:0;width:450px;height:938px"></video></div>
+<div id="scA" class="scn" style="opacity:0"><div class="z" id="zA"><video id="vA" class="clip" src="assets/r0_home.mp4" muted playsinline data-start="31" data-duration="4.8" style="width:1920px;height:1080px"></video></div><div class="dim"></div><div class="t lab" id="i0" style="left:0;width:1920px;text-align:center;top:380px;font-size:44px;letter-spacing:.3em">Introducing</div><div class="t hero" id="i1" style="left:0;width:1920px;text-align:center;top:440px;font-size:170px">CricVision <span class="lime">Pro</span></div></div>
+<div id="scB" class="scn" style="opacity:0"><div class="z" id="zB"><video id="vB" class="clip" src="assets/r1_live.mp4" muted playsinline data-start="35.8" data-duration="9.6" style="width:1920px;height:1080px"></video></div><div class="cap" id="capB"><div class="k">Live, ball by ball</div><div class="v">Swing, turn, bounce, shot and timing,<br>read from the video.</div></div></div>
+<div id="scC" class="scn" style="opacity:0"><div class="z" id="zC"><img class="card" src="assets/s_bowl_b.png" style="left:336px;top:0;width:1248px"/></div><div class="chip" id="cC1" style="left:1620px;top:120px"><div class="n">125</div><div class="l">km/h</div></div><div class="chip" id="cC2" style="left:1620px;top:270px"><div class="n lime">16 cm</div><div class="l">swing in the air</div></div><div class="chip" id="cC3" style="left:1620px;top:420px"><div class="n cyan">20 cm</div><div class="l">off the pitch</div></div><div class="chip" id="cC4" style="left:1620px;top:570px;border-color:var(--amb)"><div class="n amb">36 cm</div><div class="l">at the stumps</div></div><div class="cap" id="capC" style="left:40px;max-width:380px;bottom:auto;top:380px"><div class="k">Against a normal ball</div><div class="v" style="font-size:40px"><span style="color:#c4d0d6">Grey:</span> a plain delivery.<br><span class="lime">Green:</span> what this ball did.</div></div></div>
+<div id="scD" class="scn" style="opacity:0"><div class="z" id="zD"><img class="card" src="assets/s_action.png" style="left:160px;top:330px;width:1600px"/></div><div class="t hero" id="dT" style="left:160px;top:130px;font-size:84px">The bowler&rsquo;s <span class="lime">arm</span>, measured.</div><div class="cap" id="capD" style="left:160px"><div class="k">Screening estimate, not a lab test</div><div class="v">Arm slot, release height, wrist snap and elbow straightening against the 15&deg; limit.</div></div></div>
+<div id="scE" class="scn" style="opacity:0"><div class="z" id="zE"><video id="vE" class="clip" src="assets/r2_weight.mp4" muted playsinline data-start="73.4" data-duration="18.5" data-media-start="3" style="width:1920px;height:1080px"></video></div><div class="cap" id="capE1" style="left:110px;bottom:60px"><div class="k">Head to toe</div><div class="v">Every body segment weighed.</div></div><div class="cap" id="capE2" style="left:110px;bottom:60px"><div class="k">Centre of gravity</div><div class="v">How much weight goes forward,<br>how much falls back.</div></div></div>
+<div id="scF" class="scn" style="opacity:0"><div class="z" id="zF"><img class="card" id="f1" src="assets/s_batswing.png" style="left:336px;top:70px;width:1248px"/><img class="card" id="f2" src="assets/s_cog.png" style="left:336px;top:300px;width:1248px"/><img class="card" id="f3" src="assets/s_chain.png" style="left:336px;top:640px;width:1248px"/></div><div class="cap" id="capF" style="bottom:46px"><div class="k">Through the shot</div><div class="v">Weight, bat speed, timing chain.</div></div></div>
+<div id="scG" class="scn" style="opacity:0"><div class="z" id="zG"><img class="card" id="g1" src="assets/s_dna_score.png" style="left:120px;top:210px;width:860px"/><img class="card" id="g2" src="assets/s_dna_tech.png" style="left:1020px;top:210px;width:780px"/></div><div class="t hero" id="gT" style="left:120px;top:60px;font-size:84px">It learns <span class="lime">your game.</span></div></div>
+<div id="scH" class="scn" style="opacity:0"><div class="t hero" id="e1" style="left:0;width:1920px;text-align:center;top:420px;font-size:150px">CricVision <span class="lime">Pro</span></div><div class="t lab" id="e2" style="left:0;width:1920px;text-align:center;top:620px;font-size:40px">Know your game.</div></div>
+<div class="flash" id="fx"></div>
+<audio id="mix" src="assets/mix.wav" data-start="0" data-duration="115.5" data-volume="1"></audio>
 </div>
 
-<div class="scene clip" id="s2" data-start="5" data-duration="8" data-track-index="0">
-  <div class="head"><h2>The simulator</h2><p id="s2p">Pick conditions, press <b class="lime">Bowl next ball</b>. Every delivery runs through the same physics, MCC rules and coaching code as a live camera session.</p></div>
-  <img class="shot" id="s2img" src="assets/session.png" style="left:760px;top:60px;width:1080px"/>
-  <div class="cap" id="s2c" style="font-size:36px;width:600px;left:90px;bottom:110px;line-height:1.3">Left: scoreboard, live coach tip, ball stats, tracer + skeleton replay. Right: field radar with wagon wheel.</div>
-</div>
-
-<div class="scene clip" id="s3" data-start="13" data-duration="14" data-track-index="0">
-  <img class="shot" id="s3img" src="assets/fig1.png" style="left:310px;top:20px;width:1300px;border:none;box-shadow:none"/>
-  <div class="cap" id="c0">1  Camera frames stream into a ring buffer — each tagged with its capture time</div><div class="cap" id="c1">2  Ball meets bat: the hammer stands in for the real impact</div><div class="cap" id="c2">3  The microphone hears the crack; a 2–5 kHz band filter isolates it</div><div class="cap" id="c3">4  Feature cards: sweet-spot, edge or pad? Classified from the first 20 ms</div><div class="cap" id="c4">5  Threshold dial: trigger only when energy exceeds 8× the noise floor</div><div class="cap" id="c5">6  The frame ring: 22 tiles = 22 frames (120 fps), newest on the right</div><div class="cap" id="c6">7  The gantry slews to the tile whose timestamp matches the audio onset</div><div class="cap" id="c7">8  Pin drops: frame #102 stamped, residual +1.6 ms. Clip window ±3 frames kept</div>
-</div>
-
-<div class="scene clip" id="s4" data-start="27" data-duration="8" data-track-index="0">
-  <div class="center" style="position:absolute;top:80px;width:100%"><h2>From pixels to a verdict</h2><div class="sub">the live pipeline, in order</div></div>
-  <div class="flow">
-    <div class="node n"><h3>Pose</h3><p>MediaPipe finds 33 body joints per frame on-device</p></div><div class="arrow a">→</div>
-    <div class="node n"><h3>Ball track</h3><p>Kalman filter + optical flow follow the ball</p></div><div class="arrow a">→</div>
-    <div class="node n"><h3>3D fit</h3><p>Physics (drag, Magnus, bounce) fits a flight to the 2D track</p></div><div class="arrow a">→</div>
-    <div class="node n"><h3>Rules</h3><p>MCC: LBW, no-ball, free hit, extras</p></div><div class="arrow a">→</div>
-    <div class="node n"><h3>Coach</h3><p>Gemini live tip in ~1 s; full report at the end</p></div>
-  </div>
-  <div class="center" style="position:absolute;bottom:110px;width:100%"><div class="sub" id="s4s">Offline rules take over automatically if the network or model is unavailable</div></div>
-</div>
-
-<div class="scene clip" id="s5" data-start="35" data-duration="5" data-track-index="0">
-  <div class="head"><h2>The report</h2><p>Executive debrief, 3-drill plan, slow-motion reel, wagon wheel, pitch map, beehive, stress curve — saved locally, exportable as JSON/PDF.</p></div>
-  <div style="position:absolute;left:760px;top:40px;width:1080px;height:1000px;overflow:hidden;border-radius:14px;border:2px solid #ffffff22"><img id="s5img" src="assets/report.png" style="width:1080px;display:block"/></div>
-</div>
-
-<div class="scene center clip" id="s6" data-start="40" data-duration="4" data-track-index="0">
-  <h2>Vision and physics run <span class="lime">on your device.</span></h2>
-</div>
-</div>
 <script>
 const tl=gsap.timeline({paused:true});
-const fi=(s,t)=>tl.fromTo(s,{opacity:0,y:20},{opacity:1,y:0,duration:.5,ease:"power3.out"},t);
-tl.fromTo("#s1 h1",{opacity:0,scale:.94},{opacity:1,scale:1,duration:.8,ease:"power4.out"},0);fi("#s1sub",.6);
-tl.fromTo("#s2 .head",{opacity:0,x:-30},{opacity:1,x:0,duration:.6},5);
-tl.fromTo("#s2img",{opacity:0,x:80},{opacity:1,x:0,duration:.8,ease:"power3.out"},5.2);
-tl.fromTo("#s2c",{opacity:0},{opacity:1,duration:.5},6.5);
-tl.fromTo("#s3img",{opacity:0,scale:.96},{opacity:1,scale:1,duration:.8},13);
-for(let i=0;i<8;i++){const t=13.8+i*1.6;tl.fromTo("#c"+i,{opacity:0,y:14},{opacity:1,y:0,duration:.35},t);if(i<7)tl.to("#c"+i,{opacity:0,duration:.3},t+1.3);}
-tl.fromTo("#s4 .n",{opacity:0,y:30},{opacity:1,y:0,duration:.5,stagger:.7},27.3);
-tl.fromTo("#s4 .a",{opacity:0},{opacity:1,duration:.3,stagger:.7},27.8);
-tl.fromTo("#s4s",{opacity:0},{opacity:1,duration:.5},33);
-tl.fromTo("#s5 .head",{opacity:0},{opacity:1,duration:.5},35);
-tl.fromTo("#s5img",{y:0},{y:-1500,duration:4.6,ease:"power1.inOut"},35.2);
-tl.fromTo("#s6 h2",{opacity:0},{opacity:1,duration:.6},40);
-window.__timelines["main"]=tl;tl.seek(0);
-</script></body></html>
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const show=(id,t0,t1,o={})=>{tl.fromTo("#"+id,{opacity:0,y:o.y??24},{opacity:1,y:0,duration:o.d??.7,ease:"power3.out"},t0);if(t1)tl.to("#"+id,{opacity:0,duration:.5,ease:"power2.in"},t1)};
+// zoom: view centre (cx,cy) at scale s on a 1920x1080 stage (transform-origin 0 0)
+const zset=(id,cx,cy,s)=>({scale:s,x:-(clamp(cx,960/s,1920-960/s)*s-960),y:-(clamp(cy,540/s,1080-540/s)*s-540)});
+const zoom=(id,cx,cy,s,t0,d,e)=>tl.to("#"+id,{...zset(id,cx,cy,s),duration:d,ease:e||"power2.inOut"},t0);
+const zinit=(id,cx,cy,s)=>gsap.set("#"+id,zset(id,cx,cy,s));
+// scene fades
+const fade=(k,s,d)=>{tl.fromTo("#z"+k,{opacity:0},{opacity:1,duration:.35,ease:"none"},s);};
+// ---- intro
+tl.to("#grad",{opacity:1,duration:.6},0.2).to("#grad",{opacity:0,duration:.4},20.2);
+tl.to("#v2",{opacity:1,duration:.4,ease:"none"},12.6);
+show("c1",1.0,3.1,{d:.8});show("c2",3.3,6.7,{d:.8});show("c3",13.7,20.2,{d:.9});
+tl.to("#blk",{opacity:1,duration:.5},20.4);
+show("c4",21.2,25.2,{d:.9});
+show("p1",25.9,30.7,{d:.9});
+tl.fromTo("#phone",{opacity:0,y:120,rotate:3},{opacity:1,y:0,rotate:0,duration:1.1,ease:"power3.out"},25.6).to("#phone",{rotate:-1.2,duration:5,ease:"none"},26.7);
+tl.to("#phone",{opacity:0,duration:.35},30.65);
+tl.to("#blk",{opacity:0,duration:.01},31.0);
+tl.fromTo("#fx",{opacity:0},{opacity:.7,duration:.03},31.0).to("#fx",{opacity:0,duration:.6,ease:"power2.out"},31.04);
+// ---- A: introducing
+zinit("zA",960,540,1);tl.to("#zA",{scale:1.08,duration:4.8,ease:"none"},31);
+show("i0",31.5,35.5);show("i1",32.0,35.6,{d:1});
+// ---- B: live
+zinit("zB",960,540,1);
+zoom("zB",630,480,1.9,37.0,1.6);
+show("capB",37.4,45.0);
+tl.to("#zB",{scale:1.9,x:zset("zB",1180,330,1.6).x,y:zset("zB",1180,330,1.6).y,duration:3,ease:"power2.inOut"},41.2);
+// ---- C: bowling report
+zinit("zC",960,540,1);
+tl.fromTo("#zC",{opacity:0},{opacity:1,duration:.4},45.4);
+zoom("zC",960,540,1.0,45.4,.01);
+zoom("zC",1020,330,1.55,47.0,2.0);                        // side view with dashed normal path
+show("capC",47.8,57,{d:.8});
+show("cC1",50.5,62.5);show("cC2",52.3,62.5);show("cC3",54.6,62.5);show("cC4",57.2,62.5);
+zoom("zC",640,400,1.7,59.0,2.2);                         // plan view
+// ---- D: arm
+zinit("zD",960,540,1);tl.to("#zD",{scale:1.06,duration:10,ease:"none"},63.2);
+tl.fromTo("#zD",{opacity:0},{opacity:1,duration:.5},63.2);
+show("dT",63.7,72.6);show("capD",65.0,72.8);
+// ---- E: body weight
+zinit("zE",960,540,1);
+zoom("zE",960,730,1.5,74.6,1.6);
+show("capE1",75.0,83.0);
+zoom("zE",1200,845,2.25,81.6,2.2);
+show("capE2",85.0,91.4);
+// ---- F
+zinit("zF",960,540,1);
+tl.fromTo("#f1",{opacity:0,y:60},{opacity:1,y:0,duration:.8,ease:"power3.out"},92.2);
+tl.fromTo("#f2",{opacity:0,y:60},{opacity:1,y:0,duration:.8,ease:"power3.out"},93.4);
+tl.fromTo("#f3",{opacity:0,y:60},{opacity:1,y:0,duration:.8,ease:"power3.out"},98.0);
+show("capF",92.6,101.8);
+tl.to("#zF",{scale:1.05,duration:10,ease:"none"},91.9);
+// ---- G
+zinit("zG",960,540,1);
+tl.fromTo("#g1",{opacity:0,x:-60},{opacity:1,x:0,duration:.9,ease:"power3.out"},102.8);
+tl.fromTo("#g2",{opacity:0,x:60},{opacity:1,x:0,duration:.9,ease:"power3.out"},103.6);
+show("gT",102.6,110.6);
+// ---- H
+tl.fromTo("#e1",{opacity:0,scale:.92},{opacity:1,scale:1,duration:1.2,ease:"power3.out"},111.3);
+tl.fromTo("#e2",{opacity:0,y:20},{opacity:1,y:0,duration:.8,ease:"power3.out"},112.7);
+tl.set("#scA",{opacity:1},31);tl.set("#scA",{opacity:0},35.8);tl.set("#scB",{opacity:1},35.8);tl.set("#scB",{opacity:0},45.4);tl.set("#scC",{opacity:1},45.4);tl.set("#scC",{opacity:0},63.2);tl.set("#scD",{opacity:1},63.2);tl.set("#scD",{opacity:0},73.4);tl.set("#scE",{opacity:1},73.4);tl.set("#scE",{opacity:0},91.9);tl.set("#scF",{opacity:1},91.9);tl.set("#scF",{opacity:0},102.2);tl.set("#scG",{opacity:1},102.2);tl.set("#scG",{opacity:0},111.0);tl.set("#scH",{opacity:1},111.0);tl.set("#scH",{opacity:0},115.5);
+tl.to({},{duration:115.5},0);
+window.__timelines=window.__timelines||{};window.__timelines["main"]=tl;
+</script>
+
+</body></html>

@@ -9,9 +9,26 @@ Point a phone at the pitch (or press **Start virtual match simulator**) and Cric
 3. score the match, draw a live field radar and wagon wheel;
 4. give a one-line coaching tip within ~1 s of each ball, and a full report with drills at the end.
 
-![Demo film preview](docs/video/cricvision-demo-preview.gif)
+![Launch film preview](docs/video/cricvision-launch-preview.gif)
 
-> Full 44 s film: [`docs/video/cricvision-demo.mp4`](docs/video/cricvision-demo.mp4). Its source is in [`docs/video/hyperframes-src`](docs/video/hyperframes-src).
+> Full 1 min 55 s film (1080p, with voiceover): [`docs/video/cricvision-launch-film.mp4`](docs/video/cricvision-launch-film.mp4). After the opening broadcast clips, every shot is the real app. Source and scripts: [`docs/video/hyperframes-src`](docs/video/hyperframes-src).
+
+### What the film shows
+
+Each screenshot below is the app, captured from a real simulator session, and matches a moment in the film.
+
+| Film time | What you see | Screenshot |
+| --- | --- | --- |
+| 0:36 | Live session: swing, turn, bounce, shot and timing per ball | [`app-session.png`](docs/screens/app-session.png) |
+| 0:45 | **Swing and seam against a normal ball.** Grey is a plain delivery released the same way, green is what the ball did | ![Bowling report](docs/screens/bowling-swing-vs-normal.png) |
+| 1:03 | **Bowler's arm:** arm slot, release height, wrist snap, elbow straightening against the 15° limit | ![Bowler action](docs/screens/bowler-action.png) |
+| 1:13 | **Weight transfer, stance.** Every segment weighed head to toe, centre of gravity over the back foot (70% back) | ![Weight at stance](docs/screens/weight-stance.png) |
+| 1:20 | **Weight transfer, contact.** Centre of gravity has moved onto the front foot (81% front) | ![Weight at contact](docs/screens/weight-contact.png) |
+| 1:22 | Replay card in the live session: scan, side view, mass table | ![Body weight view](docs/screens/weight-transfer.png) |
+| 1:32 | Bat swing metrics, weight over time, timing chain | ![Bat swing](docs/screens/bat-swing.png) ![Centre of gravity curve](docs/screens/centre-of-gravity-curve.png) ![Timing chain](docs/screens/timing-chain.png) |
+| 1:42 | **Player DNA:** where you score and your technique signature | ![Where you score](docs/screens/player-dna-zones.png) ![Technique signature](docs/screens/player-dna-technique.png) |
+
+The weight figures are estimates from one camera's skeleton (see [§4.12a](#412a-centre-of-gravity-and-body-weight-view)), not force-plate or motion-capture measurements.
 
 ---
 
@@ -486,4 +503,4 @@ Without a key the coach runs in offline mode.
 
 * **Fig 1** is plain HTML/SVG in `docs/figures/src/fig1-explainer.html`; screenshot it with headless Chrome. The stack diagram was built with the stack-diagram skill (`docs/figures/stack.html`).
 * **Screenshots** in `docs/screens` were captured from the production build with headless Chrome (simulator, 14 balls, then Finish).
-* **Video.** The [brag skill](https://github.com/latent-spaces/brag) is built on Hyperframes. The `/brag` skill itself was not available in this environment, so the film was composed directly with the Hyperframes CLI (HTML + GSAP): see [`docs/video/hyperframes-src`](docs/video/hyperframes-src). Render with `npx hyperframes render` from that folder (Node 22+, ffmpeg and Chrome required).
+* **Video.** The film is a Hyperframes composition (HTML + GSAP) in [`docs/video/hyperframes-src`](docs/video/hyperframes-src). The app footage was recorded from the production build with Playwright and a Chrome screencast (`tools/`), the voiceover is Kokoro TTS, and the music and effects are synthesised. Render with `npx hyperframes render` from that folder (Node 22+, ffmpeg and Chrome required).
