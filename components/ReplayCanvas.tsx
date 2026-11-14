@@ -5,12 +5,18 @@ import { BONES, JOINTS } from "@/lib/cv/skeleton";
 import { WORLD_CORNERS, buildCameraModel, project } from "@/lib/physics/homography";
 import { virtualCalibration } from "@/lib/sim/virtual-camera";
 import { getFrame, hasFrames } from "@/lib/storage/idb";
+import { WV_H, WV_W, drawWeightView } from "./WeightView";
 
 /** Plays a stored highlight clip: skeletons for bowler + batter and the Hawkeye-style ball tracer, in slow motion. */
 export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; className?: string }) {
   const cv = useRef<HTMLCanvasElement>(null);
+  const cv2 = useRef<HTMLCanvasElement>(null);
+  const scanRef = useRef<number | null>(null);
+  const scanT0 = useRef(0);
   const [rate, setRate] = useState(0.25);
   const [playing, setPlaying] = useState(true);
+  const [showCom, setShowCom] = useState(true);
+  const comRef = useRef(true); comRef.current = showCom;
   const [pos, setPos] = useState(0);
   const cam = useMemo(() => buildCameraModel(virtualCalibration(clip.width, clip.height)), [clip.width, clip.height]);
   const T = clip.overlays.length / clip.fps;
@@ -57,11 +63,17 @@ export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; clas
         for (const [a, b] of BONES) { const p = lm[off + JOINTS.indexOf(a)], q = lm[off + JOINTS.indexOf(b)]; if (p.x < 0 || q.x < 0) continue; g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); g.stroke(); }
         g.fillStyle = col; for (let k = 0; k < n; k++) { const p = lm[off + k]; if (p.x >= 0) { g.beginPath(); g.arc(p.x, p.y, 3.5, 0, 7); g.fill(); } }
       });
+      if (cv2.current && comRef.current) drawWeightView(cv2.current.getContext("2d")!, clip, i, scanRef.current);
       g.fillStyle = "#000a"; g.fillRect(0, 0, c.width, 34);
       g.fillStyle = "#fff"; g.font = "bold 16px system-ui"; g.fillText(`Ball ${clip.ballIndex} · ${clip.reason} · ${rate}× · t=${ov.t.toFixed(2)}s`, 10, 23);
     };
     const loop = (ts: number) => {
-      if (playing) { const dt = last.current ? (ts - last.current) / 1000 : 0; t.current += dt * rate; if (t.current >= T) t.current = 0; setPos(t.current / T); }
+      if (scanRef.current !== null) {
+        if (!scanT0.current) scanT0.current = ts;
+        const u = (ts - scanT0.current) / 3200;
+        t.current = 0; setPos(0);
+        if (u >= 1.25) { scanRef.current = null; scanT0.current = 0; setPlaying(true); } else scanRef.current = Math.min(1, u);
+      } else if (playing) { const dt = last.current ? (ts - last.current) / 1000 : 0; t.current += dt * rate; if (t.current >= T) t.current = 0; setPos(t.current / T); }
       last.current = ts; draw(); raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
@@ -69,13 +81,18 @@ export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; clas
   }, [clip, cam, rate, playing, T]);
 
   return (
-    <div className={className}>
+    <div className={`${className ?? ""} grid gap-4 ${showCom ? "lg:grid-cols-[2fr_3fr]" : ""} [&>*]:min-w-0`}>
+      <div>
       <canvas ref={cv} width={clip.width} height={clip.height} className="w-full rounded-lg bg-black" />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button className="btn" onClick={() => setPlaying((p) => !p)}>{playing ? "Pause" : "Play"}</button>
+        <button className="btn" onClick={() => { scanRef.current = 0; scanT0.current = 0; setPlaying(false); setShowCom(true); }}>Scan body</button>
+        <button className={`btn ${showCom ? "!bg-amber-400 !text-black" : ""}`} onClick={() => setShowCom((v) => !v)}>Centre of gravity</button>
         {[0.1, 0.25, 0.5, 1].map((r) => <button key={r} className={`btn ${rate === r ? "!bg-lime-glow !text-black" : ""}`} onClick={() => setRate(r)}>{r}×</button>)}
         <input type="range" min={0} max={1} step={0.001} value={pos} onChange={(e) => { t.current = +e.target.value * T; setPos(+e.target.value); }} className="min-w-[8rem] flex-1 accent-lime-400" />
       </div>
+      </div>
+      {showCom && <canvas ref={cv2} width={WV_W} height={WV_H} className="w-full self-start rounded-lg bg-black" />}
     </div>
   );
 }

@@ -27,7 +27,7 @@ export default function SimSession({ cfg }: { cfg: SessionConfig }) {
   const history = useRef<string[]>([]);
   const total = score.rules.maxOvers * 6;
   const last = balls[balls.length - 1];
-  const clip: ClipMeta | null = useMemo(() => (last ? buildSimClip(last, cam, "live", clipReason(last) ?? "Latest ball") : null), [last, cam]);
+  const clip: ClipMeta | null = useMemo(() => (last ? buildSimClip(last, cam, "live", clipReason(last) ?? "Latest ball", 30, cfg.handedness) : null), [last, cam, cfg.handedness]);
 
   const bowl = () => {
     if (score.inningsOver) return;
@@ -71,12 +71,12 @@ export default function SimSession({ cfg }: { cfg: SessionConfig }) {
             {r.flags.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{r.flags.map((f) => <span key={f} className="rounded bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{f}</span>)}</div>}
           </div>
         )}
-        {clip && <div className="card"><div className="label">Hawkeye tracer + skeleton replay</div><ReplayCanvas clip={clip} /></div>}
       </div>
       <div className="space-y-4">
         <FieldRadar field={field} onChange={setField} hand={cfg.handedness} boundary={cfg.boundaryRadius} wagon={score.wagon} shotPath={r?.outcome.shotPath?.map((p) => ({ x: p.x, y: p.y }))} />
         <div className="card flex items-center gap-4"><WagonMini score={score} /><p className="text-sm text-white/60">Wagon wheel: cyan = four, lime = six. Drag fielders on the radar between balls — the next delivery uses the new field.</p></div>
       </div>
+      {clip && <div className="card lg:col-span-2"><div className="label">Hawkeye tracer, skeleton replay and body weight</div><ReplayCanvas clip={clip} /></div>}
     </div>
   );
 }

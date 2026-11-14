@@ -17,7 +17,7 @@ export async function finalizeSim(opts: { id: string; cfg: SessionConfig; balls:
   for (const b of balls) {
     const why = clipReason(b);
     if (!why) continue;
-    const clip = buildSimClip(b, cam, id, why);
+    const clip = buildSimClip(b, cam, id, why, 30, cfg.handedness);
     b.record.clipId = clip.id;
     clips.push(clip);
   }

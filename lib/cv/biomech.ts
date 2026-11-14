@@ -1,3 +1,4 @@
+import { centreOfMass, weightState } from "./com";
 import type { BattingBiomech, BowlerArm, BowlingBiomech, Handedness } from "@/lib/types";
 import { BOWLER_CREASE_Y, RETURN_CREASE_HALF, clamp, deg, wrap180 } from "@/lib/physics/constants";
 import {
@@ -155,13 +156,18 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   const st = 0;
   const hipMid = (i: number) => mid(fr[i].j.lHip, fr[i].j.rHip);
 
-  // weight transfer at impact: hip centre projected between back (right) and front (left) ankles
-  const back = fr[imp].j.rAnk, frontA = fr[imp].j.lAnk;
-  const ax = frontA.x - back.x, ay = frontA.y - back.y;
-  const aa = ax * ax + ay * ay;
-  const hm = hipMid(imp);
-  const s = aa > 1e-4 ? ((hm.x - back.x) * ax + (hm.y - back.y) * ay) / aa : 0.5;
-  const frontPct = clamp(s, 0, 1) * 100;
+  // weight transfer: whole-body centre of mass projected between the back and front foot (see ./com).
+  // Frames are mirrored for left-handers, so the batter always faces with the left foot forward here.
+  const wAt = (i: number) => weightState(fr[i].j, "RHB");
+  const frontPct = clamp(wAt(imp).frontPct, 0, 100);
+  const comImp = centreOfMass(fr[imp].j), comSt = centreOfMass(fr[st].j);
+  const comShiftCm = (comSt.y - comImp.y) * 100; // + = toward the bowler
+  // weight-on-front-foot curve: 34 samples from 450 ms before contact to 100 ms after, so shots line up at contact
+  const weightSeries: number[] = [];
+  for (let k = 0; k < 34; k++) {
+    const tt = fr[imp].t - 0.45 + (0.55 * k) / 33;
+    weightSeries.push(Math.round(clamp(wAt(nearestIdx(fr, tt)).frontPct, 0, 100) * 10) / 10);
+  }
 
   const stride = horiz(sub(fr[imp].j.lAnk, fr[st].j.lAnk)) * 100;
 
@@ -248,7 +254,7 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
       frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, backliftDeg: backlift,
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
       batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
-      weightShiftCm: shiftCm, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,
+      weightShiftCm: shiftCm, comShiftCm, weightSeries, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,
     },
   };
 }

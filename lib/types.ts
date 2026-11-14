@@ -170,6 +170,8 @@ export interface BattingBiomech {
   swingArcCm: number;
   /** how far the hips travelled toward the bowler from stance to contact, cm */
   weightShiftCm: number;
+  comShiftCm: number;              // whole-body centre of mass travel stance -> contact, + toward the bowler
+  weightSeries: number[];          // % of weight on the front foot, 34 samples from -450 ms to +100 ms around contact
   /** when the hips were moving fastest, relative to contact, ms (negative = before contact) */
   hipPeakMs: number;
   /** when the hands were moving fastest, relative to contact, ms (near 0 = bat at full speed at contact) */
@@ -277,8 +279,28 @@ export interface CoachReport {
 
 export interface FieldPlayer { id: string; label: string; x: number; y: number; keeper?: boolean }
 
+export interface ClipComFrame {
+  c: { x: number; y: number };        // centre of mass, image space
+  g: { x: number; y: number };        // point on the ground directly below it
+  back: { x: number; y: number };     // back-foot ground contact
+  front: { x: number; y: number };    // front-foot ground contact
+  pct: number;                        // % of weight on the front foot
+  fwd: number;                        // m/s toward the bowler
+  seg: { x: number; y: number; w: number }[]; // segment centres, w = mass fraction
+  side: ClipSideView;                 // the same body seen from the side, in metres
+}
+
+/** Side-on view: y = metres along the pitch (batter at ~20 m, bowler at 0), z = height. */
+export interface ClipSideView {
+  j: number[];    // 19 joints as y,z pairs, in JOINTS order
+  seg: number[];  // 14 segment centres as y,z,massFraction triples
+  c: [number, number]; // centre of mass y,z
+  b: number; f: number; // back / front foot ground contact, y
+}
+
 export interface ClipOverlayFrame {
   t: number;
+  com?: ClipComFrame | null;
   landmarks?: { x: number; y: number; v?: number }[];
   ball?: { x: number; y: number } | null;
 }

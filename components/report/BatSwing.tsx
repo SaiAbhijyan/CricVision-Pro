@@ -1,5 +1,5 @@
 "use client";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import type { BallRecord } from "@/lib/types";
 import { Box } from "./Charts";
 
@@ -18,10 +18,12 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
     ["Attack angle", `${avg(bt.map((b) => b.attackAngleDeg)).toFixed(0)}°`, "+ upward through the ball"],
     ["Swing path", `${avg(bt.map((b) => b.swingPathDeg)).toFixed(0)}°`, "0 = straight, + across to leg"],
     ["Downswing", `${avg(bt.map((b) => b.downswingMs)).toFixed(0)} ms`, `${avg(bt.map((b) => b.swingArcCm)).toFixed(0)} cm arc`],
-    ["Weight on front foot", `${avg(bt.map((b) => b.frontFootPct)).toFixed(0)}%`, "at contact"],
-    ["Weight shift", `${avg(bt.map((b) => b.weightShiftCm)).toFixed(0)} cm`, "hips toward the bowler"],
+    ["Weight on front foot", `${avg(bt.map((b) => b.frontFootPct)).toFixed(0)}%`, "whole-body centre of gravity, at contact"],
+    ["Centre of gravity travel", `${avg(bt.map((b) => b.comShiftCm)).toFixed(0)} cm`, "head to toe, toward the bowler"],
     ["Head drift", `${avg(bt.map((b) => Math.abs(b.headDriftCm))).toFixed(1)} cm`, "off the line, average"],
   ];
+  const curves = sw.map((b) => b.batting!.weightSeries).filter((a) => a && a.length === 34);
+  const wcurve = curves.length ? Array.from({ length: 34 }, (_, k) => ({ ms: Math.round(-450 + (550 * k) / 33), front: avg(curves.map((a) => a[k])), back: 100 - avg(curves.map((a) => a[k])) })) : [];
   const speedVsExit = sw.filter((b) => b.ballistics).map((b) => ({ x: b.batting!.batSpeedKph, y: b.ballistics!.exitSpeedKph, edge: b.timing === "Edge" }));
   const byLen = (["Yorker", "Full", "Good", "Short"] as const).map((len) => {
     const bs = sw.filter((b) => b.length === len);
@@ -36,6 +38,15 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
           {tiles.map(([k, v, s]) => <div key={k} className="stat"><div className="label !mb-0">{k}</div><div className="text-xl font-bold">{v}</div><div className="text-[11px] text-white/45">{s}</div></div>)}
         </div>
       </div>
+      {wcurve.length > 0 && (
+        <div className="card">
+          <h3 className="font-bold">Centre of gravity: where your weight goes</h3>
+          <p className="mb-2 text-xs text-white/50">Every joint from head to toe carries its share of body mass (head 7%, trunk 43%, each thigh 14%, and so on). Their weighted centre is your centre of gravity; the chart shows how much of it sits over the front foot, from 450 ms before contact to 100 ms after. A rising line that peaks at contact is weight going through the ball.</p>
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer><LineChart data={wcurve}><CartesianGrid stroke="#ffffff14" /><XAxis dataKey="ms" type="number" domain={[-450, 100]} ticks={[-450, -300, -150, 0, 100]} tickFormatter={(v: number) => `${v} ms`} {...ax} /><YAxis {...ax} domain={[0, 100]} ticks={[0, 50, 100]} tickFormatter={(v: number) => `${v}%`} width={44} /><Tooltip {...tip} formatter={(v: number) => `${v.toFixed(0)}%`} /><ReferenceLine x={0} stroke="#ffb347" strokeDasharray="4 4" label={{ value: "contact", fill: "#ffb347", fontSize: 11 }} /><ReferenceLine y={50} stroke="#ffffff33" /><Line type="monotone" dataKey="front" name="Front foot" stroke="#b6ff3c" strokeWidth={3} dot={false} /><Line type="monotone" dataKey="back" name="Back foot" stroke="#6ee7ff" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer>
+          </div>
+        </div>
+      )}
       <div className="card">
         <h3 className="font-bold">Timing chain</h3>
         <p className="mb-2 text-xs text-white/50">Power flows hips, then shoulders, then hands. Each number is when that part moved fastest relative to contact (0 ms). Hands peaking close to 0 means the bat was at full speed at contact.</p>

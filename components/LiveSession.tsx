@@ -96,7 +96,7 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
       const ns = applyOutcome(scoreRef.current, r.outcome, res.wagon); setScore(ns); setNBalls(balls.current.length);
       const why = r.outcome.wicket ? `Wicket – ${r.outcome.wicket}` : r.outcome.boundary ? `Boundary ${r.outcome.boundary}` : r.flags[0] ?? null;
       if (why) {
-        const clip = await buildLiveClip({ id: `live-${startedAt.current}-c${r.index}`, sessionId: `live-${startedAt.current}`, ballIndex: r.index, reason: why, cam: model, ring, t0: Math.max(tStart - 1.2, ring.oldest()?.t ?? 0), t1: tEnd + 2.8, bowler: [...bowler], batter: [...batter], track: pts }).catch(() => null);
+        const clip = await buildLiveClip({ id: `live-${startedAt.current}-c${r.index}`, sessionId: `live-${startedAt.current}`, ballIndex: r.index, reason: why, cam: model, ring, t0: Math.max(tStart - 1.2, ring.oldest()?.t ?? 0), t1: tEnd + 2.8, bowler: [...bowler], batter: [...batter], track: pts, hand: cfg.handedness }).catch(() => null);
         if (clip) { r.clipId = clip.meta.id; clips.current.push(clip); }
       }
       void liveCoach(r, history.current).then((c) => { history.current.push(c.text); setCoach(`${c.text}  (${c.source === "offline-rules" ? "offline" : "AI"} · ${c.ms} ms)`); });

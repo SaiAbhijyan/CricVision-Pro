@@ -1,3 +1,5 @@
+import type { Handedness } from "@/lib/types";
+import { comOverlay } from "@/lib/cv/com";
 import type { CameraModel, ClipMeta, ClipOverlayFrame, Pt } from "@/lib/types";
 import { project } from "@/lib/physics/homography";
 import { JOINTS, projectSkeleton, type Skeleton } from "@/lib/cv/skeleton";
@@ -16,7 +18,7 @@ const nearest = (fr: Skeleton[], t: number): Skeleton | null => {
 };
 
 /** 4-second annotated replay data (skeletons + Hawkeye tracer) for a simulated ball. */
-export function buildSimClip(b: SimBall, cam: CameraModel, sessionId: string, reason: string, fps = 30): ClipMeta {
+export function buildSimClip(b: SimBall, cam: CameraModel, sessionId: string, reason: string, fps = 30, hand: Handedness = "RHB"): ClipMeta {
   const W = cam.imageWidth, H = cam.imageHeight;
   const t0 = -0.6, dur = 4;
   const overlays: ClipOverlayFrame[] = [];
@@ -47,7 +49,9 @@ export function buildSimClip(b: SimBall, cam: CameraModel, sessionId: string, re
     const bp = ballAt(t);
     const px = bp ? project(cam, bp) : null;
     if (px) tracer.push(px);
-    overlays.push({ t, landmarks: lm, ball: px });
+    const bs = nearest(b.batterFrames, t), bprev = nearest(b.batterFrames, t - 1 / fps);
+    const com = bs ? comOverlay((p) => project(cam, p), bs, bprev && bprev !== bs ? bprev : undefined, hand) : null;
+    overlays.push({ t, landmarks: lm, ball: px, com });
   }
   return { id: `${sessionId}-c${b.record.index}`, sessionId, ballIndex: b.record.index, reason, createdAt: Date.now(), frameCount: n, width: W, height: H, fps, overlays, tracer };
 }

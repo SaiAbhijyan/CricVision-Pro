@@ -9,6 +9,9 @@ import { sanitizeBall, sanitizeSession, safeText } from "../lib/security/sanitiz
 import { takeToken, _resetRateLimits } from "../lib/security/rate-limit";
 import { assertSameOrigin, readJson } from "../lib/security/request";
 import { ballDigest } from "../lib/coach/digest";
+import { generateBatter, defaultBatter } from "../lib/sim/synth-pose";
+import { extractBatting } from "../lib/cv/biomech";
+import { segments, weightState } from "../lib/cv/com";
 import type { SessionConfig } from "../lib/types";
 
 let failed = 0, passed = 0;
@@ -149,6 +152,21 @@ async function main() {
   ok((await readJson(post(JSON.stringify({ a: "x".repeat(500) })), 100)) === null, "oversized JSON refused");
   ok((await readJson(post("not json"), 100)) === null, "invalid JSON refused");
   ok((await readJson(post('{"a":1}', "text/plain"), 100)) === null, "wrong content type refused");
+
+  // ---- centre of mass / weight transfer ----
+  {
+    const fr = generateBatter(defaultBatter({ frontFootPct: 80 }));
+    ok(Math.abs(segments(fr[0].j).reduce((a, g) => a + g.m, 0) - 1) < 0.002, "segment masses sum to 1");
+    const ex = extractBatting(fr, { hand: "RHB", impactT: 0.55 })!;
+    ok(ex.biomech.weightSeries.length === 34, "weight series has 34 samples");
+    ok(ex.biomech.frontFootPct > 60 && ex.biomech.frontFootPct <= 100, "CoM weight is on the front foot for a front-foot shot: " + ex.biomech.frontFootPct.toFixed(0));
+    const back = extractBatting(generateBatter(defaultBatter({ frontFootPct: 25 })), { hand: "RHB", impactT: 0.55 })!;
+    ok(back.biomech.frontFootPct < ex.biomech.frontFootPct - 20, "back-foot shot puts less weight forward: " + back.biomech.frontFootPct.toFixed(0) + " vs " + ex.biomech.frontFootPct.toFixed(0));
+    const w0 = weightState(fr[0].j, "RHB");
+    ok(w0.com.z > 0.8 && w0.com.z < 1.2, "CoM height in the stance is near the waist: " + w0.com.z.toFixed(2));
+    const lh = extractBatting(generateBatter(defaultBatter({ hand: "LHB", frontFootPct: 80 })), { hand: "LHB", impactT: 0.55 })!;
+    ok(Math.abs(lh.biomech.frontFootPct - ex.biomech.frontFootPct) < 12, "left-hander mirrors right-hander weight: " + lh.biomech.frontFootPct.toFixed(0));
+  }
 
   console.log(`checks: ${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);

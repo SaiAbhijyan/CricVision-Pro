@@ -79,6 +79,8 @@ function batting(x: unknown): BattingBiomech | null {
     batSpeedKph: n("batSpeedKph", 0, 170), attackAngleDeg: n("attackAngleDeg", -60, 60), swingPathDeg: n("swingPathDeg", -90, 90),
     downswingMs: n("downswingMs", 0, 1500), swingArcCm: n("swingArcCm", 0, 400),
     weightShiftCm: n("weightShiftCm", 0, 300), hipPeakMs: n("hipPeakMs", -1500, 500), handPeakMs: n("handPeakMs", -1500, 500), chainOrdered: x.chainOrdered === true,
+    comShiftCm: n("comShiftCm", -100, 300),
+    weightSeries: Array.isArray(x.weightSeries) ? x.weightSeries.slice(0, 34).map((v) => numD(v, 0, 100)) : [],
   };
 }
 

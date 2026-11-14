@@ -1,3 +1,6 @@
+import { project } from "@/lib/physics/homography";
+import { comOverlay } from "@/lib/cv/com";
+import type { Handedness } from "@/lib/types";
 import type { CameraModel, ClipMeta, ClipOverlayFrame } from "@/lib/types";
 import { JOINTS, projectSkeleton, type Skeleton } from "@/lib/cv/skeleton";
 import type { FrameRing } from "@/lib/cv/frame-ring";
@@ -12,7 +15,7 @@ const nearestSk = (fr: Skeleton[], t: number, tol = 0.06): Skeleton | null => {
 /** Builds an annotated highlight clip (JPEG frames + skeleton/tracer overlays) from the live circular frame buffer. */
 export async function buildLiveClip(o: {
   id: string; sessionId: string; ballIndex: number; reason: string; cam: CameraModel; ring: FrameRing<ImageBitmap>;
-  t0: number; t1: number; bowler: Skeleton[]; batter: Skeleton[]; track: TrackPt[];
+  t0: number; t1: number; bowler: Skeleton[]; batter: Skeleton[]; track: TrackPt[]; hand?: Handedness;
 }): Promise<{ meta: ClipMeta; frames: Blob[] } | null> {
   const fr = o.ring.range(o.t0, o.t1);
   if (fr.length < 4) return null;
@@ -32,7 +35,9 @@ export async function buildLiveClip(o: {
     let b: { x: number; y: number } | null = null, bd = 0.05;
     for (const p of o.track) { const d = Math.abs(p.t - f.t); if (d < bd) { bd = d; b = { x: p.x * k, y: p.y * k }; } }
     if (b) tracer.push(b);
-    overlays.push({ t: f.t - fr[0].t, landmarks: lm, ball: b });
+    const bs = nearestSk(o.batter, f.t), bprev = nearestSk(o.batter, f.t - 1 / 30);
+    const com = bs ? comOverlay((p) => project(o.cam, p), bs, bprev && bprev !== bs ? bprev : undefined, o.hand ?? "RHB", k) : null;
+    overlays.push({ t: f.t - fr[0].t, landmarks: lm, ball: b, com });
   }
   const dt = (fr[fr.length - 1].t - fr[0].t) / (fr.length - 1);
   return { meta: { id: o.id, sessionId: o.sessionId, ballIndex: o.ballIndex, reason: o.reason, createdAt: Date.now(), frameCount: fr.length, width: W, height: H, fps: dt > 0 ? 1 / dt : 30, overlays, tracer }, frames };
