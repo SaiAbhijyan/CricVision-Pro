@@ -393,6 +393,12 @@ The report draws top-down and side views of the real path against the dashed nor
 
 Per shot: bat speed (estimated from hand speed), attack angle, swing path, downswing time, swing arc, front-foot weight at contact, weight shift in cm, head drift, and a kinetic-chain timing (when the hips, then hands, moved fastest relative to contact). The report plots bat speed against ball exit speed and weight transfer by length.
 
+### 4.12a Centre of gravity and body-weight view
+
+*Files: `lib/cv/com.ts`, `components/WeightView.ts`, `components/ReplayCanvas.tsx`*
+
+Weight transfer is the whole-body centre of mass, not a foot-pressure guess. The 19 skeleton joints are grouped into 14 segments with de Leva mass fractions (head 6.9%, trunk 43.5%, arms about 9.9%, thighs about 28.3%, shanks 8.7%, feet 2.7%). The mass-weighted centre is projected onto the line between the back-foot and front-foot ground contacts, along the pitch: 0% is all back, 100% is all front. The report charts that share from 450 ms before contact to 100 ms after, plus the centre's travel in cm toward the bowler. In the replay, **Scan body** sweeps a line from head to toe, filling each segment's mass, and **Centre of gravity** shows a side view with the plumb line and base of support. These are estimates from one camera's skeleton, not force-plate or motion-capture measurements.
+
 ### 4.13 Player DNA
 
 *Files: `lib/analytics/profile.ts`, `app/profile/page.tsx`*
@@ -464,7 +470,7 @@ Without a key the coach runs in offline mode.
 
 ## 7. Testing
 
-`npm test` runs `scripts/selfcheck.ts` and `scripts/checks.ts` (61 assertions: movement vs normal delivery, Player DNA, sanitizer, rate limit). The first covers: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
+`npm test` runs `scripts/selfcheck.ts` and `scripts/checks.ts` (73 assertions, including centre of gravity: movement vs normal delivery, Player DNA, sanitizer, rate limit). The first covers: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
 
 ## 8. Known limitations
 
