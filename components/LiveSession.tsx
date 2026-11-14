@@ -133,7 +133,7 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
   };
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[1.4fr_1fr] [&>*]:min-w-0">
       <div className="space-y-3">
         <div className="relative overflow-hidden rounded-xl bg-black">
           <video ref={video} playsInline muted className="w-full" />

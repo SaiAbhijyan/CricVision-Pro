@@ -22,7 +22,7 @@ export default function DrsReview({ balls }: { balls: BallRecord[] }) {
         <p className="text-xs text-white/50">Three checks, as in televised reviews: where it pitched, where it hit the pad, and whether the projected path would hit the stumps. If under half the ball would hit, it is &quot;umpire&apos;s call&quot; and the on-field decision stands. There is no umpire&apos;s call on where it pitched.</p>
       </div>
       <div className="flex flex-wrap gap-1.5">{rows.map((b) => <button key={b.index} className={`btn !px-2.5 !py-1 text-xs ${b.index === cur.index ? "!bg-lime-glow !text-black" : ""}`} onClick={() => setSel(b.index)}>#{b.index}</button>)}</div>
-      <div className="grid gap-4 md:grid-cols-[260px_1fr]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[260px_1fr] [&>*]:min-w-0">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg bg-pitch-900/60" role="img" aria-label="Stumps as seen from the bowler with the projected ball position">
           <line x1="10" x2={W - 10} y1={sy(0)} y2={sy(0)} stroke="#ffffff33" />
           {[-STUMP_HALF + 0.0114, 0, STUMP_HALF - 0.0114].map((x) => <rect key={x} x={sx(x) - 3} y={sy(STUMP_HEIGHT)} width={6} height={sy(0) - sy(STUMP_HEIGHT)} fill="#e8e2c8" />)}

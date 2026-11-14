@@ -47,7 +47,7 @@ export default function SimSession({ cfg }: { cfg: SessionConfig }) {
 
   const r = last?.record;
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[1fr_1.1fr] [&>*]:min-w-0">
       <div className="space-y-4">
         <Scoreboard score={score} />
         <div className="flex flex-wrap gap-2">

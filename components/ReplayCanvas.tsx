@@ -71,10 +71,10 @@ export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; clas
   return (
     <div className={className}>
       <canvas ref={cv} width={clip.width} height={clip.height} className="w-full rounded-lg bg-black" />
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <button className="btn" onClick={() => setPlaying((p) => !p)}>{playing ? "Pause" : "Play"}</button>
         {[0.1, 0.25, 0.5, 1].map((r) => <button key={r} className={`btn ${rate === r ? "!bg-lime-glow !text-black" : ""}`} onClick={() => setRate(r)}>{r}×</button>)}
-        <input type="range" min={0} max={1} step={0.001} value={pos} onChange={(e) => { t.current = +e.target.value * T; setPos(+e.target.value); }} className="flex-1 accent-lime-400" />
+        <input type="range" min={0} max={1} step={0.001} value={pos} onChange={(e) => { t.current = +e.target.value * T; setPos(+e.target.value); }} className="min-w-[8rem] flex-1 accent-lime-400" />
       </div>
     </div>
   );

@@ -77,7 +77,7 @@ export default function BowlingReport({ balls, style }: { balls: BallRecord[]; s
       <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Choose a delivery">
         {rows.map((b) => <button key={b.index} role="tab" aria-selected={b.index === cur.index} className={`btn !px-2.5 !py-1 text-xs ${b.index === cur.index ? "!bg-lime-glow !text-black" : ""}`} onClick={() => setSel(b.index)}>#{b.index}</button>)}
       </div>
-      <div className="grid gap-4 md:grid-cols-[300px_1fr]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[300px_1fr] [&>*]:min-w-0">
         <Trace m={m} view="top" rel={cur} />
         <div className="space-y-3">
           <Trace m={m} view="side" rel={cur} />
