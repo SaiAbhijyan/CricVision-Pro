@@ -82,6 +82,12 @@ export function extractBowling(frames: Skeleton[], opts: { arm: BowlerArm; relea
   const elbowAt = (i: number) => angleAt(fr[i].j.rSh, fr[i].j.rEl, fr[i].j.rWr);
   const ext = Math.max(0, elbowAt(rel) - elbowAt(h));
 
+  // arm rotation and slot: the shoulder-to-wrist line swinging about the shoulder
+  const armVec = (i: number) => sub(fr[i].j.rWr, fr[i].j.rSh);
+  const armSlot = angleBetween(armVec(rel), { x: 0, y: 0, z: 1 });
+  let armRot = 0;
+  for (let i = h + 1; i <= rel; i++) armRot = Math.max(armRot, angleBetween(armVec(i - 1), armVec(i)) / dtAt(fr, i));
+
   const kneeAt = (i: number) => angleAt(fr[i].j.lHip, fr[i].j.lKn, fr[i].j.lAnk);
   const kneeRel = kneeAt(rel);
   const kneeFfc = kneeAt(ffcS);
@@ -114,6 +120,10 @@ export function extractBowling(frames: Skeleton[], opts: { arm: BowlerArm; relea
       backFootOutsideReturnCm: outside,
       elbowExtensionDeg: ext,
       elbowFlag: ext > 15,
+      elbowHorizDeg: elbowAt(h),
+      elbowReleaseDeg: elbowAt(rel),
+      armSlotDeg: armSlot,
+      armRotationDegS: armRot,
       frontKneeBraceDeg: kneeRel,
       frontKneeCollapseDeg: kneeFfc - kneeRel,
       kneeBraced: kneeRel > 165,
@@ -212,6 +222,21 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   const batSpeedKph = clamp((3.0 * peakHand + ((snap * Math.PI) / 180) * 0.65) * 3.6, 0, 170);
   const downMs = Math.max(0, (fr[imp].t - fr[bl].t) * 1000);
 
+  // ---- kinetic chain: when did the hips, shoulders and hands each move fastest, relative to contact? ----
+  const speedAt = (i: number, pt: (k: number) => { x: number; y: number; z: number }) => {
+    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+    return len(sub(pt(i1), pt(i0))) / Math.max(1e-4, fr[i1].t - fr[i0].t);
+  };
+  const shMid = (i: number) => mid(fr[i].j.lSh, fr[i].j.rSh);
+  const peakT = (pt: (k: number) => { x: number; y: number; z: number }) => {
+    let bi = trig, bv = -1;
+    for (let i = trig; i <= Math.min(n - 1, imp + 2); i++) { const v = speedAt(i, pt); if (v > bv) { bv = v; bi = i; } }
+    return (fr[bi].t - fr[imp].t) * 1000;
+  };
+  const hipPeak = peakT(hipMid), shPeak = peakT(shMid), handPeak = peakT(hands);
+  const chainOrdered = hipPeak <= shPeak + 10 && shPeak <= handPeak + 10;
+  const shiftCm = horiz(sub(hipMid(imp), hipMid(st))) * 100;
+
   const hb = mid(fr[bl].j.lWr, fr[bl].j.rWr), hi = mid(fr[imp].j.lWr, fr[imp].j.rWr);
   const d = sub(hi, hb);
   const plane = deg(Math.atan2(horiz(d), Math.max(1e-6, -d.z)));
@@ -223,6 +248,7 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
       frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, backliftDeg: backlift,
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
       batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
+      weightShiftCm: shiftCm, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,
     },
   };
 }

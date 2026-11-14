@@ -304,6 +304,8 @@ function measureMovement(
     airSwingCm: air, airSwingMaxCm: airMax, turnCm: turn, totalMoveCm: total,
     pitchShiftM: base.bounce.p.y - actual.bounce.p.y,
     turnDeg,
+    spinRpm: Math.hypot(init.w.x, init.w.y, init.w.z) / RPM,
+    spinAxisTiltDeg: Math.abs(deg(Math.atan2(init.w.z, init.w.x))) > 90 ? 180 - Math.abs(deg(Math.atan2(init.w.z, init.w.x))) : Math.abs(deg(Math.atan2(init.w.z, init.w.x))),
     swingType: Math.abs(airMax) < 1 ? "Straight" : airMax > 0 ? "Away" : "In",
     turnType: Math.abs(turn) < 1.5 ? "Straight" : turn > 0 ? "Away" : "In",
     actual: thin(actual.samples, actual.tEnd),

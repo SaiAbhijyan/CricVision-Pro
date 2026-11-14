@@ -103,6 +103,9 @@ export interface BallMovement {
   pitchShiftM: number;
   /** net off-the-pitch direction change, degrees (same sign convention as lateral numbers) */
   turnDeg: number;
+  /** revolutions per minute at release, and the tilt of the spin axis from pure backspin (0) toward sidespin (90), degrees */
+  spinRpm: number;
+  spinAxisTiltDeg: number;
   swingType: "Away" | "In" | "Straight";
   turnType: "Away" | "In" | "Straight";
   /** ~40-point paths (x,y,z m) for drawing the real delivery against the plain one */
@@ -123,6 +126,13 @@ export interface BowlingBiomech {
   backFootOutsideReturnCm: number; // + = cutting/outside return crease
   elbowExtensionDeg: number;
   elbowFlag: boolean;
+  /** elbow angle when the upper arm is horizontal, and at release (ICC measures the change between them), degrees */
+  elbowHorizDeg: number;
+  elbowReleaseDeg: number;
+  /** angle of the shoulder-to-wrist line from vertical at release: 0 = over the top, 90 = round-arm */
+  armSlotDeg: number;
+  /** peak angular speed of the whole arm swinging about the shoulder, between arm horizontal and release, deg/s */
+  armRotationDegS: number;
   frontKneeBraceDeg: number;       // at release
   frontKneeCollapseDeg: number;    // brace@FFC - brace@release (positive = collapsed)
   kneeBraced: boolean;
@@ -158,6 +168,14 @@ export interface BattingBiomech {
   downswingMs: number;
   /** length of the hands' path from top of backlift to contact, cm */
   swingArcCm: number;
+  /** how far the hips travelled toward the bowler from stance to contact, cm */
+  weightShiftCm: number;
+  /** when the hips were moving fastest, relative to contact, ms (negative = before contact) */
+  hipPeakMs: number;
+  /** when the hands were moving fastest, relative to contact, ms (near 0 = bat at full speed at contact) */
+  handPeakMs: number;
+  /** true when peak speed moved from the hips, to the shoulders, to the hands, in that order (an efficient kinetic chain) */
+  chainOrdered: boolean;
 }
 
 export type TimingClass = "Early" | "Middle / Sweet Spot" | "Late" | "Edge" | "Pad/Miss";
@@ -184,6 +202,12 @@ export interface LbwVerdict {
   decision: "OUT" | "NOT OUT";
   reason: string;
   projectedAtStumps: { x: number; z: number } | null;
+  /** metres between where the ball pitched and where it hit the pad; under 0.4 m the projection is flagged "extreme" as in Hawk-Eye */
+  pitchToImpactM: number | null;
+  impactToStumpsM: number | null;
+  extreme: boolean;
+  /** how far the ball centre is inside (+) or outside (-) the stump edge when it arrives, mm; 0 = grazing */
+  stumpMarginMm: number | null;
 }
 
 export interface BallOutcome {

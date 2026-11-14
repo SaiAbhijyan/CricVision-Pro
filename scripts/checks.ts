@@ -62,6 +62,19 @@ async function main() {
   ok(swings.every((b) => b.batting!.batSpeedKph > 30 && b.batting!.batSpeedKph < 140), "bat speeds are plausible (30-140 km/h)");
   ok(swings.every((b) => b.batting!.downswingMs > 100 && b.batting!.swingArcCm > 20), "downswing time and arc are measured");
 
+  /* ---- arm rotation, kinetic chain, spin rate, review detail ---- */
+  const bw = s1.balls.filter((b) => b.bowling);
+  ok(bw.length > 8 && bw.every((b) => b.bowling!.armRotationDegS > 100 && b.bowling!.armSlotDeg >= 0 && b.bowling!.armSlotDeg <= 180), "arm rotation and slot measured for every delivery");
+  ok(bw.every((b) => Math.abs(b.bowling!.elbowReleaseDeg - b.bowling!.elbowHorizDeg) >= 0), "elbow angles reported at arm-horizontal and release");
+  ok(swings.every((b) => Number.isFinite(b.batting!.weightShiftCm) && b.batting!.handPeakMs <= 50 && b.batting!.hipPeakMs <= 50), "kinetic-chain timing is reported relative to contact");
+  const spinCfg2 = { ...base, bowlerStyle: "Off-Spin" as const };
+  const sSpin = mkSession("sp", 5_000, spinCfg2, 21);
+  ok(sSpin.balls.filter((b) => b.movement).every((b) => b.movement!.spinRpm > 300), "spinners release with real spin rate (rpm)");
+  const mRpm = (ss: typeof s1) => { const v = ss.balls.filter((b) => b.movement).map((b) => b.movement!.spinRpm); return v.reduce((a, b) => a + b, 0) / v.length; };
+  ok(mRpm(sSpin) > mRpm(s1), "spinners spin the ball faster than pace bowlers");
+  const lbws = [s1, sSpin, mkSession("l", 7, base, 31, 60), mkSession("l2", 8, base, 32, 60)].flatMap((x) => x.balls).filter((b) => b.outcome.lbw);
+  ok(lbws.every((b) => b.outcome.lbw!.pitchToImpactM !== null || !b.outcome.lbw!.extreme), "review reports pitch-to-pad distance");
+
   /* ---- Player DNA across sessions ---- */
   ok(zoneOf(0, "RHB") === "Straight" && zoneOf(90, "RHB") === "Point" && zoneOf(270, "RHB") === "Square leg", "zones for a right-hander");
   ok(zoneOf(90, "LHB") === "Square leg" && zoneOf(270, "LHB") === "Point", "zones mirror for a left-hander");

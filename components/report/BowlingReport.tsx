@@ -81,10 +81,11 @@ export default function BowlingReport({ balls, style }: { balls: BallRecord[]; s
         <Trace m={m} view="top" rel={cur} />
         <div className="space-y-3">
           <Trace m={m} view="side" rel={cur} />
-          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
             <div className="stat"><div className="label !mb-0">Ball {cur.index}</div><b>{f(cur.speedKph)} km/h</b><div className="text-[11px] text-white/45">{cur.length} · {cur.line}</div></div>
             <div className="stat"><div className="label !mb-0">Swing</div><b>{f(Math.abs(m.airSwingMaxCm))} cm {dirWord(m.airSwingMaxCm, "away", "in")}</b></div>
             <div className="stat"><div className="label !mb-0">{moveWord}</div><b>{f(Math.abs(m.turnCm))} cm {dirWord(m.turnCm, "away", "in")}</b><div className="text-[11px] text-white/45">{f(Math.abs(m.turnDeg), 1)}° direction change</div></div>
+            <div className="stat"><div className="label !mb-0">Spin rate</div><b>{f(m.spinRpm)} rpm</b><div className="text-[11px] text-white/45">axis {f(m.spinAxisTiltDeg)}° from backspin</div></div>
             <div className="stat"><div className="label !mb-0">Total at stumps</div><b>{f(Math.abs(m.totalMoveCm))} cm {dirWord(m.totalMoveCm, "away", "in")}</b></div>
           </div>
           <p className="text-[11px] text-white/45"><span className="text-lime-glow">Green</span> = the real delivery, <span className="text-white/70">dashed grey</span> = the normal ball from the same release, <span className="text-amber-300">orange dot</span> = where it pitched.</p>
@@ -92,14 +93,14 @@ export default function BowlingReport({ balls, style }: { balls: BallRecord[]; s
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
-          <thead className="text-white/50"><tr>{["#", "Pace", "Length / line", "Swing", moveWord, "Float / dip", "Bounce at stumps"].map((h) => <th key={h} className="px-2 py-1 font-medium">{h}</th>)}</tr></thead>
+          <thead className="text-white/50"><tr>{["#", "Pace", "Length / line", "Swing", moveWord, "Spin", "Float / dip", "Bounce at stumps"].map((h) => <th key={h} className="px-2 py-1 font-medium">{h}</th>)}</tr></thead>
           <tbody>
             {rows.map((b) => { const x = b.movement!; return (
               <tr key={b.index} className={`cursor-pointer border-t border-white/10 hover:bg-white/5 ${b.index === cur.index ? "bg-white/10" : ""}`} onClick={() => setSel(b.index)}>
                 <td className="px-2 py-1">{b.index}</td><td className="px-2 py-1">{f(b.speedKph)} km/h</td><td className="px-2 py-1">{b.length} · {b.line}</td>
                 <td className="px-2 py-1">{f(Math.abs(x.airSwingMaxCm))} cm {x.swingType === "Straight" ? "" : x.swingType.toLowerCase()}</td>
                 <td className="px-2 py-1">{f(Math.abs(x.turnCm))} cm {x.turnType === "Straight" ? "" : x.turnType.toLowerCase()}</td>
-                <td className="px-2 py-1">{signed(-x.pitchShiftM, 2)} m</td><td className="px-2 py-1">{f(b.bounceHeightCm)} cm</td>
+                <td className="px-2 py-1">{x.spinRpm >= 50 ? `${f(x.spinRpm, 0)} rpm` : "-"}</td><td className="px-2 py-1">{signed(-x.pitchShiftM, 2)} m</td><td className="px-2 py-1">{f(b.bounceHeightCm)} cm</td>
               </tr>); })}
           </tbody>
         </table>

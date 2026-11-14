@@ -170,7 +170,10 @@ export function lbwVerdict(i: LbwInput): LbwVerdict {
   else if (wickets === "Missing") reason = "Ball would have missed the stumps";
   else if (wickets === "Umpire's Call") reason = "Umpire's Call – clipping the stumps, on-field decision stands (not out)";
   else { decision = "OUT"; reason = `Pitched ${pitching.toLowerCase()}, struck ${impact.toLowerCase()}, hitting the stumps`; }
-  return { pitching, impact, wickets, decision, reason, projectedAtStumps: proj };
+  const pitchToImpact = pitch ? Math.abs(pad.p.y - pitch.y) : null;
+  const toStumps = a ? Math.abs(PITCH_LENGTH - pad.p.y) : null;
+  const margin = proj ? Math.min(STUMP_HALF - Math.abs(proj.x), STUMP_HEIGHT + 0.013 - proj.z) * 1000 : null;
+  return { pitching, impact, wickets, decision, reason, projectedAtStumps: proj, pitchToImpactM: pitchToImpact, impactToStumpsM: toStumps, extreme: pitchToImpact !== null && pitchToImpact < 0.4, stumpMarginMm: margin };
 }
 
 export const PITCH_END = PITCH_LENGTH;

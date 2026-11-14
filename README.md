@@ -391,7 +391,7 @@ The report draws top-down and side views of the real path against the dashed nor
 
 *Files: `lib/cv/biomech.ts`, `components/report/BatSwing.tsx`*
 
-Per shot: bat speed (estimated from hand speed), attack angle, swing path, downswing time, swing arc, front-foot weight at contact, and head drift. The report plots bat speed against ball exit speed and weight transfer by length.
+Per shot: bat speed (estimated from hand speed), attack angle, swing path, downswing time, swing arc, front-foot weight at contact, weight shift in cm, head drift, and a kinetic-chain timing (when the hips, then hands, moved fastest relative to contact). The report plots bat speed against ball exit speed and weight transfer by length.
 
 ### 4.13 Player DNA
 
@@ -408,6 +408,25 @@ An 8-parameter fit (release position, velocity, swing, spin) to the tracked pixe
 ### 4.15 Security
 
 See [SECURITY.md](SECURITY.md): allowlist reconstruction of all client data, same-origin checks, rate limits, size caps, strict headers, and self-hosting of the vision models.
+
+### 4.16 Comparison with commercial tools
+
+What the published material says these systems do, and where CricVision Pro stands. "Built" means implemented and covered by synthetic tests; **nothing here has been validated against a radar gun or motion capture yet**, and one independent study found that [Fulltrack AI overestimated speed against a radar gun](https://rune.une.edu.au/web/handle/1959.11/63335), so treat any phone-video speed as an estimate until it is checked.
+
+| Capability | Fulltrack AI | Ludimos | Broadcast (Hawk-Eye, Virtual Eye) | CricVision Pro |
+|---|---|---|---|---|
+| Ball speed, line, length, pitch map, beehive | yes ([site](https://landing.fulltrack.ai/coachplus)) | yes ([HCLTech](https://hcltech.com/blogs/harnessing-power-artificial-intelligence-sports)) | yes | Built (live monocular fit + simulator) |
+| Swing and spin (type, revs) | yes ([overview](https://www.toolmage.com/en/tool/fulltrack-ai/)) | swing/seam and spin revolutions ([founder post](https://cricconnect.com/profile/490/madan-raj/blog/1019/cricket-powered-by-ai-ludimos)) | yes | Built: swing and turn in cm against a normal delivery, spin rpm and axis. Single-camera magnitudes are approximate |
+| DRS-style LBW review | yes | not stated | yes, with umpire's call ([explainer](https://www.cricket.com.au/news/3319658)) | Built: pitching, impact, wickets, umpire's call band, extreme-case flag |
+| Bat tracking (bat speed, downswing, path) | not stated | yes | sensors | Built from the hands' path; bat speed is an estimate |
+| Body and skeleton analysis, kinogram | partial | skeleton overlay, bowling kinogram | lab-based | Built: weight transfer, kinetic-chain timing, hip-shoulder split. No kinogram strip yet |
+| Bowler arm action | not stated | skeleton only | ICC lab protocol, [15° elbow extension limit](https://www.espncricinfo.com/print/story/780269) | Built: elbow change from arm-horizontal to release, arm slot, arm turnover. A screening estimate, not a lab test |
+| Learns a player's style over time | player profile | player profile | team analytics | Built: Player DNA |
+| On-device processing | cloud | cloud | broadcast servers | Built: vision and physics run in the browser |
+
+**Not matched:** multi-camera triangulation (Hawk-Eye uses six cameras at about 340 fps), radar-based speed, high-frame-rate capture, and independent validation. I could not find reliable public information on Zoota, so it is not in the table.
+
+**Next step to earn parity:** record the same deliveries with a radar gun and an optical reference, publish the error, and tune. The sections above give the metrics; this is the part only real hardware can answer.
 
 ## 5. Repository map
 

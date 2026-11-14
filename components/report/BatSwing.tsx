@@ -19,6 +19,7 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
     ["Swing path", `${avg(bt.map((b) => b.swingPathDeg)).toFixed(0)}°`, "0 = straight, + across to leg"],
     ["Downswing", `${avg(bt.map((b) => b.downswingMs)).toFixed(0)} ms`, `${avg(bt.map((b) => b.swingArcCm)).toFixed(0)} cm arc`],
     ["Weight on front foot", `${avg(bt.map((b) => b.frontFootPct)).toFixed(0)}%`, "at contact"],
+    ["Weight shift", `${avg(bt.map((b) => b.weightShiftCm)).toFixed(0)} cm`, "hips toward the bowler"],
     ["Head drift", `${avg(bt.map((b) => Math.abs(b.headDriftCm))).toFixed(1)} cm`, "off the line, average"],
   ];
   const speedVsExit = sw.filter((b) => b.ballistics).map((b) => ({ x: b.batting!.batSpeedKph, y: b.ballistics!.exitSpeedKph, edge: b.timing === "Edge" }));
@@ -31,8 +32,18 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
       <div className="card">
         <h3 className="text-lg font-bold">Bat swing and weight transfer</h3>
         <p className="mb-3 text-xs text-white/50">Measured from the batter&apos;s hand path and feet through each shot. Bat speed is an estimate of the bat-head speed at contact; attack angle and path describe the shape of the swing.</p>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-7">
           {tiles.map(([k, v, s]) => <div key={k} className="stat"><div className="label !mb-0">{k}</div><div className="text-xl font-bold">{v}</div><div className="text-[11px] text-white/45">{s}</div></div>)}
+        </div>
+      </div>
+      <div className="card">
+        <h3 className="font-bold">Timing chain</h3>
+        <p className="mb-2 text-xs text-white/50">Power flows hips, then shoulders, then hands. Each number is when that part moved fastest relative to contact (0 ms). Hands peaking close to 0 means the bat was at full speed at contact.</p>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="stat"><div className="label !mb-0">Hips peak</div><div className="text-xl font-bold">{avg(bt.map((b) => b.hipPeakMs)).toFixed(0)} ms</div></div>
+          <div className="stat"><div className="label !mb-0">Hands peak</div><div className="text-xl font-bold">{avg(bt.map((b) => b.handPeakMs)).toFixed(0)} ms</div></div>
+          <div className="stat"><div className="label !mb-0">Chain in order</div><div className="text-xl font-bold">{Math.round((bt.filter((b) => b.chainOrdered).length / bt.length) * 100)}%</div><div className="text-[11px] text-white/45">of shots</div></div>
+          <div className="stat"><div className="label !mb-0">Trigger to contact</div><div className="text-xl font-bold">{avg(bt.map((b) => b.triggerMs)).toFixed(0)} ms</div></div>
         </div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">

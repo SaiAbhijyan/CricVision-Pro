@@ -61,7 +61,7 @@ function bowling(x: unknown): BowlingBiomech | null {
   return {
     runUpSpeedMs: n("runUpSpeedMs", 0, 15), backFootStability: n("backFootStability", 0, 100), frontStrideCm: n("frontStrideCm", 0, 400),
     frontFootOverCreaseCm: n("frontFootOverCreaseCm", -300, 300), backFootOutsideReturnCm: n("backFootOutsideReturnCm", -300, 300),
-    elbowExtensionDeg: n("elbowExtensionDeg", 0, 90), elbowFlag: x.elbowFlag === true, frontKneeBraceDeg: n("frontKneeBraceDeg", 0, 200),
+    elbowExtensionDeg: n("elbowExtensionDeg", 0, 90), elbowFlag: x.elbowFlag === true, elbowHorizDeg: n("elbowHorizDeg", 0, 200), elbowReleaseDeg: n("elbowReleaseDeg", 0, 200), armSlotDeg: n("armSlotDeg", 0, 180), armRotationDegS: n("armRotationDegS", 0, 5000), frontKneeBraceDeg: n("frontKneeBraceDeg", 0, 200),
     frontKneeCollapseDeg: n("frontKneeCollapseDeg", -90, 90), kneeBraced: x.kneeBraced === true, hipShoulderSepDeg: n("hipShoulderSepDeg", 0, 120),
     counterRotationDeg: n("counterRotationDeg", 0, 120), counterRotationFlag: x.counterRotationFlag === true, releaseHeightM: n("releaseHeightM", 0, 3),
     releaseLateralCm: n("releaseLateralCm", 0, 300), releaseXm: n("releaseXm", -3, 3), wristSnapDegS: n("wristSnapDegS", 0, 5000),
@@ -78,6 +78,7 @@ function batting(x: unknown): BattingBiomech | null {
     wristSnapDegS: n("wristSnapDegS", 0, 5000), swingPlaneDeg: n("swingPlaneDeg", -90, 90), swingDetected: x.swingDetected === true,
     batSpeedKph: n("batSpeedKph", 0, 170), attackAngleDeg: n("attackAngleDeg", -60, 60), swingPathDeg: n("swingPathDeg", -90, 90),
     downswingMs: n("downswingMs", 0, 1500), swingArcCm: n("swingArcCm", 0, 400),
+    weightShiftCm: n("weightShiftCm", 0, 300), hipPeakMs: n("hipPeakMs", -1500, 500), handPeakMs: n("handPeakMs", -1500, 500), chainOrdered: x.chainOrdered === true,
   };
 }
 
@@ -94,7 +95,7 @@ export function sanitizeBall(x: unknown, fallbackIndex = 1): BallRecord | null {
     speedKph: num(x.speedKph, 0, 220), bounceSpeedKph: num(x.bounceSpeedKph, 0, 220), swingCm: num(x.swingCm, 0, 500), turnDeg: num(x.turnDeg, -45, 45),
     movement: mv ? {
       airSwingCm: numD(mv.airSwingCm, -300, 300), airSwingMaxCm: numD(mv.airSwingMaxCm, -300, 300), turnCm: numD(mv.turnCm, -500, 500),
-      totalMoveCm: numD(mv.totalMoveCm, -600, 600), pitchShiftM: numD(mv.pitchShiftM, -10, 10), turnDeg: numD(mv.turnDeg, -45, 45),
+      totalMoveCm: numD(mv.totalMoveCm, -600, 600), pitchShiftM: numD(mv.pitchShiftM, -10, 10), turnDeg: numD(mv.turnDeg, -45, 45), spinRpm: numD(mv.spinRpm, 0, 6000), spinAxisTiltDeg: numD(mv.spinAxisTiltDeg, 0, 90),
       swingType: oneOf(mv.swingType, ["Away", "In", "Straight"] as const) ?? "Straight", turnType: oneOf(mv.turnType, ["Away", "In", "Straight"] as const) ?? "Straight",
       actual: [], baseline: [], // drawing paths are never needed server-side
     } : null,
