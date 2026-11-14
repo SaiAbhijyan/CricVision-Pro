@@ -33,7 +33,7 @@ export function TimingMatrix({ balls }: { balls: BallRecord[] }) {
   const d = timingByLength(balls).map((r) => ({ ...r, length: `${r.length} (${r.n})` }));
   return (
     <Box title="Timing / shot matrix by length" note="Share of shots by contact quality for each length.">
-      <ResponsiveContainer><BarChart data={d}><CartesianGrid stroke="#ffffff14" /><XAxis dataKey="length" {...ax} /><YAxis {...ax} domain={[0, 100]} unit="%" /><Tooltip contentStyle={{ background: "#0c1d14", border: "1px solid #ffffff22" }} /><Legend />
+      <ResponsiveContainer><BarChart data={d}><CartesianGrid stroke="#ffffff14" /><XAxis dataKey="length" {...ax} /><YAxis {...ax} domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={(v: number) => `${v}%`} width={44} /><Tooltip contentStyle={{ background: "#0c1d14", border: "1px solid #ffffff22" }} /><Legend />
         <Bar dataKey="sweet" name="Sweet spot" stackId="a" fill="#b6ff3c" /><Bar dataKey="early" name="Early" stackId="a" fill="#ffd34d" /><Bar dataKey="late" name="Late" stackId="a" fill="#ff9f43" /><Bar dataKey="edge" name="Edge" stackId="a" fill="#ff5a5a" /><Bar dataKey="miss" name="Pad/miss" stackId="a" fill="#8b8b8b" /></BarChart></ResponsiveContainer>
     </Box>
   );

@@ -1,0 +1,79 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=1920, height=1080"/>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+<style>
+:root{--ground:#07110c;--ink:#eaf6ee;--lime:#b6ff3c;--cyan:#6ee7ff;--mut:#7fa08c}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:var(--ground);font-family:Inter,Helvetica,Arial,sans-serif;color:var(--ink)}
+#root{position:relative;width:1920px;height:1080px}
+.scene{position:absolute;inset:0;background:var(--ground)}
+h1{font-size:120px;letter-spacing:-.03em;font-weight:700}
+h2{font-size:64px;letter-spacing:-.02em;font-weight:700}
+.sub{font-size:34px;color:var(--mut)}
+.lime{color:var(--lime)}
+.center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;text-align:center}
+.shot{position:absolute;border:2px solid #ffffff22;border-radius:14px;box-shadow:0 30px 90px #000a}
+.head{position:absolute;left:90px;top:70px;width:560px}
+.head h2{margin-bottom:20px} .head p{font-size:30px;line-height:1.4;color:var(--mut)}
+.cap{position:absolute;left:90px;bottom:90px;width:1740px;font-size:44px;font-weight:600;opacity:0;color:var(--ink)}
+.cap b{color:var(--lime)}
+.flow{position:absolute;left:0;top:300px;width:1920px;display:flex;justify-content:center;gap:26px;align-items:center}
+.node{width:260px;height:230px;border:2px solid #b6ff3c66;border-radius:18px;background:#0c1d14;padding:26px;opacity:0}
+.node h3{font-size:32px;color:var(--lime);margin-bottom:12px} .node p{font-size:23px;line-height:1.35;color:var(--mut)}
+.arrow{font-size:56px;color:var(--lime);opacity:0}
+</style></head><body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="44" data-width="1920" data-height="1080">
+
+<div class="scene center clip" id="s1" data-start="0" data-duration="5" data-track-index="0">
+  <h1>CricVision <span class="lime">Pro</span></h1>
+  <div class="sub" id="s1sub">An on-device AI cricket coach, match simulator and analytics suite</div>
+</div>
+
+<div class="scene clip" id="s2" data-start="5" data-duration="8" data-track-index="0">
+  <div class="head"><h2>The simulator</h2><p id="s2p">Pick conditions, press <b class="lime">Bowl next ball</b>. Every delivery runs through the same physics, MCC rules and coaching code as a live camera session.</p></div>
+  <img class="shot" id="s2img" src="assets/session.png" style="left:760px;top:60px;width:1080px"/>
+  <div class="cap" id="s2c" style="font-size:36px;width:600px;left:90px;bottom:110px;line-height:1.3">Left: scoreboard, live coach tip, ball stats, tracer + skeleton replay. Right: field radar with wagon wheel.</div>
+</div>
+
+<div class="scene clip" id="s3" data-start="13" data-duration="14" data-track-index="0">
+  <img class="shot" id="s3img" src="assets/fig1.png" style="left:310px;top:20px;width:1300px;border:none;box-shadow:none"/>
+  <div class="cap" id="c0">1  Camera frames stream into a ring buffer — each tagged with its capture time</div><div class="cap" id="c1">2  Ball meets bat: the hammer stands in for the real impact</div><div class="cap" id="c2">3  The microphone hears the crack; a 2–5 kHz band filter isolates it</div><div class="cap" id="c3">4  Feature cards: sweet-spot, edge or pad? Classified from the first 20 ms</div><div class="cap" id="c4">5  Threshold dial: trigger only when energy exceeds 8× the noise floor</div><div class="cap" id="c5">6  The frame ring: 22 tiles = 22 frames (120 fps), newest on the right</div><div class="cap" id="c6">7  The gantry slews to the tile whose timestamp matches the audio onset</div><div class="cap" id="c7">8  Pin drops: frame #102 stamped, residual +1.6 ms. Clip window ±3 frames kept</div>
+</div>
+
+<div class="scene clip" id="s4" data-start="27" data-duration="8" data-track-index="0">
+  <div class="center" style="position:absolute;top:80px;width:100%"><h2>From pixels to a verdict</h2><div class="sub">the live pipeline, in order</div></div>
+  <div class="flow">
+    <div class="node n"><h3>Pose</h3><p>MediaPipe finds 33 body joints per frame on-device</p></div><div class="arrow a">→</div>
+    <div class="node n"><h3>Ball track</h3><p>Kalman filter + optical flow follow the ball</p></div><div class="arrow a">→</div>
+    <div class="node n"><h3>3D fit</h3><p>Physics (drag, Magnus, bounce) fits a flight to the 2D track</p></div><div class="arrow a">→</div>
+    <div class="node n"><h3>Rules</h3><p>MCC: LBW, no-ball, free hit, extras</p></div><div class="arrow a">→</div>
+    <div class="node n"><h3>Coach</h3><p>Gemini live tip in ~1 s; full report at the end</p></div>
+  </div>
+  <div class="center" style="position:absolute;bottom:110px;width:100%"><div class="sub" id="s4s">Offline rules take over automatically if the network or model is unavailable</div></div>
+</div>
+
+<div class="scene clip" id="s5" data-start="35" data-duration="5" data-track-index="0">
+  <div class="head"><h2>The report</h2><p>Executive debrief, 3-drill plan, slow-motion reel, wagon wheel, pitch map, beehive, stress curve — saved locally, exportable as JSON/PDF.</p></div>
+  <div style="position:absolute;left:760px;top:40px;width:1080px;height:1000px;overflow:hidden;border-radius:14px;border:2px solid #ffffff22"><img id="s5img" src="assets/report.png" style="width:1080px;display:block"/></div>
+</div>
+
+<div class="scene center clip" id="s6" data-start="40" data-duration="4" data-track-index="0">
+  <h2>Vision and physics run <span class="lime">on your device.</span></h2>
+</div>
+</div>
+<script>
+const tl=gsap.timeline({paused:true});
+const fi=(s,t)=>tl.fromTo(s,{opacity:0,y:20},{opacity:1,y:0,duration:.5,ease:"power3.out"},t);
+tl.fromTo("#s1 h1",{opacity:0,scale:.94},{opacity:1,scale:1,duration:.8,ease:"power4.out"},0);fi("#s1sub",.6);
+tl.fromTo("#s2 .head",{opacity:0,x:-30},{opacity:1,x:0,duration:.6},5);
+tl.fromTo("#s2img",{opacity:0,x:80},{opacity:1,x:0,duration:.8,ease:"power3.out"},5.2);
+tl.fromTo("#s2c",{opacity:0},{opacity:1,duration:.5},6.5);
+tl.fromTo("#s3img",{opacity:0,scale:.96},{opacity:1,scale:1,duration:.8},13);
+for(let i=0;i<8;i++){const t=13.8+i*1.6;tl.fromTo("#c"+i,{opacity:0,y:14},{opacity:1,y:0,duration:.35},t);if(i<7)tl.to("#c"+i,{opacity:0,duration:.3},t+1.3);}
+tl.fromTo("#s4 .n",{opacity:0,y:30},{opacity:1,y:0,duration:.5,stagger:.7},27.3);
+tl.fromTo("#s4 .a",{opacity:0},{opacity:1,duration:.3,stagger:.7},27.8);
+tl.fromTo("#s4s",{opacity:0},{opacity:1,duration:.5},33);
+tl.fromTo("#s5 .head",{opacity:0},{opacity:1,duration:.5},35);
+tl.fromTo("#s5img",{y:0},{y:-1500,duration:4.6,ease:"power1.inOut"},35.2);
+tl.fromTo("#s6 h2",{opacity:0},{opacity:1,duration:.6},40);
+window.__timelines["main"]=tl;tl.seek(0);
+</script></body></html>

@@ -4,7 +4,7 @@ import type { ClipMeta } from "@/lib/types";
 import { BONES, JOINTS } from "@/lib/cv/skeleton";
 import { WORLD_CORNERS, buildCameraModel, project } from "@/lib/physics/homography";
 import { virtualCalibration } from "@/lib/sim/virtual-camera";
-import { getFrame } from "@/lib/storage/idb";
+import { getFrame, hasFrames } from "@/lib/storage/idb";
 
 /** Plays a stored highlight clip: skeletons for bowler + batter and the Hawkeye-style ball tracer, in slow motion. */
 export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; className?: string }) {
@@ -15,15 +15,28 @@ export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; clas
   const cam = useMemo(() => buildCameraModel(virtualCalibration(clip.width, clip.height)), [clip.width, clip.height]);
   const T = clip.overlays.length / clip.fps;
   const raf = useRef(0), last = useRef(0), t = useRef(0);
+  const bitmaps = useRef<(ImageBitmap | null)[] | null>(null);
+
+  // Live clips carry JPEG frames in IndexedDB: load them once. Simulated clips have none and are drawn on the virtual-camera backdrop.
+  useEffect(() => {
+    let dead = false; bitmaps.current = null;
+    (async () => {
+      if (!(await hasFrames(clip.id).catch(() => false))) return;
+      const arr: (ImageBitmap | null)[] = [];
+      for (let i = 0; i < clip.frameCount; i++) { const b = await getFrame(clip.id, i).catch(() => undefined); arr.push(b ? await createImageBitmap(b) : null); if (dead) return; }
+      bitmaps.current = arr;
+    })();
+    return () => { dead = true; bitmaps.current?.forEach((b) => b?.close()); bitmaps.current = null; };
+  }, [clip.id, clip.frameCount]);
 
   useEffect(() => {
-    const draw = async () => {
+    const draw = () => {
       const c = cv.current; if (!c) return; const g = c.getContext("2d")!;
       const i = Math.min(clip.overlays.length - 1, Math.floor(t.current * clip.fps));
       const ov = clip.overlays[i];
       g.clearRect(0, 0, c.width, c.height);
-      const blob = await getFrame(clip.id, i).catch(() => undefined);
-      if (blob) { const bm = await createImageBitmap(blob); g.drawImage(bm, 0, 0, c.width, c.height); bm.close(); }
+      const bm = bitmaps.current?.[i];
+      if (bm) g.drawImage(bm, 0, 0, c.width, c.height);
       else if (cam) {
         g.fillStyle = "#0c1d14"; g.fillRect(0, 0, c.width, c.height);
         const poly = WORLD_CORNERS.map((p) => project(cam, { x: p.x, y: p.y, z: 0 })).filter(Boolean) as { x: number; y: number }[];
@@ -49,7 +62,7 @@ export default function ReplayCanvas({ clip, className }: { clip: ClipMeta; clas
     };
     const loop = (ts: number) => {
       if (playing) { const dt = last.current ? (ts - last.current) / 1000 : 0; t.current += dt * rate; if (t.current >= T) t.current = 0; setPos(t.current / T); }
-      last.current = ts; void draw(); raf.current = requestAnimationFrame(loop);
+      last.current = ts; draw(); raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf.current);
