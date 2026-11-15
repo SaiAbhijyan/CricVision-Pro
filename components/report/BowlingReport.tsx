@@ -82,7 +82,7 @@ export default function BowlingReport({ balls, style }: { balls: BallRecord[]; s
         <div className="space-y-3">
           <Trace m={m} view="side" rel={cur} />
           <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
-            <div className="stat"><div className="label !mb-0">Ball {cur.index}</div><b>{f(cur.speedKph)} km/h</b><div className="text-[11px] text-white/45">{cur.length} · {cur.line}</div></div>
+            <div className="stat"><div className="label !mb-0">Ball {cur.index}</div><b>{f(cur.speedKph)} km/h{cur.quality?.speedSigmaKph !== undefined ? <span className="text-xs font-normal text-white/50"> ±{f(cur.quality.speedSigmaKph, 0)}</span> : null}</b><div className="text-[11px] text-white/45">{cur.length} · {cur.line}{cur.quality ? " · estimate" : ""}</div></div>
             <div className="stat"><div className="label !mb-0">Swing</div><b>{f(Math.abs(m.airSwingMaxCm))} cm {dirWord(m.airSwingMaxCm, "away", "in")}</b></div>
             <div className="stat"><div className="label !mb-0">{moveWord}</div><b>{f(Math.abs(m.turnCm))} cm {dirWord(m.turnCm, "away", "in")}</b><div className="text-[11px] text-white/45">{f(Math.abs(m.turnDeg), 1)}° direction change</div></div>
             <div className="stat"><div className="label !mb-0">Spin rate</div><b>{f(m.spinRpm)} rpm</b><div className="text-[11px] text-white/45">axis {f(m.spinAxisTiltDeg)}° from backspin</div></div>
@@ -97,7 +97,7 @@ export default function BowlingReport({ balls, style }: { balls: BallRecord[]; s
           <tbody>
             {rows.map((b) => { const x = b.movement!; return (
               <tr key={b.index} className={`cursor-pointer border-t border-white/10 hover:bg-white/5 ${b.index === cur.index ? "bg-white/10" : ""}`} onClick={() => setSel(b.index)}>
-                <td className="px-2 py-1">{b.index}</td><td className="px-2 py-1">{f(b.speedKph)} km/h</td><td className="px-2 py-1">{b.length} · {b.line}</td>
+                <td className="px-2 py-1">{b.index}</td><td className="px-2 py-1">{f(b.speedKph)} km/h{b.quality && b.quality.confidence < 0.7 ? <span title="Low confidence" className="ml-1 text-amber-300">?</span> : null}</td><td className="px-2 py-1">{b.length} · {b.line}</td>
                 <td className="px-2 py-1">{f(Math.abs(x.airSwingMaxCm))} cm {x.swingType === "Straight" ? "" : x.swingType.toLowerCase()}</td>
                 <td className="px-2 py-1">{f(Math.abs(x.turnCm))} cm {x.turnType === "Straight" ? "" : x.turnType.toLowerCase()}</td>
                 <td className="px-2 py-1">{x.spinRpm >= 50 ? `${f(x.spinRpm, 0)} rpm` : "-"}</td><td className="px-2 py-1">{signed(-x.pitchShiftM, 2)} m</td><td className="px-2 py-1">{f(b.bounceHeightCm)} cm</td>

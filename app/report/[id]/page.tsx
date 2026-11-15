@@ -7,6 +7,7 @@ import { fetchReport } from "@/lib/coach/client";
 import { sessionStats } from "@/lib/analytics/aggregate";
 import ExecutiveDebrief from "@/components/report/ExecutiveDebrief";
 import ReplayReel from "@/components/report/ReplayReel";
+import QualityBanner from "@/components/report/QualityBanner";
 import BowlingReport from "@/components/report/BowlingReport";
 import BatSwing from "@/components/report/BatSwing";
 import BowlerAction from "@/components/report/BowlerAction";
@@ -43,12 +44,13 @@ export default function ReportPage() {
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-black">Session report</h1>
-        <span className="text-sm text-white/50">{new Date(s.startedAt).toLocaleString()} · {s.config.mode} · {s.mode === "sim" ? "simulated" : "live camera"}</span>
+        <span className="text-sm text-white/50">{new Date(s.startedAt).toLocaleString()} · {s.config.mode} · {s.mode === "sim" ? "simulated" : s.mode === "upload" ? "uploaded clip" : "live camera"}</span>
         <button className="btn ml-auto" onClick={download}>Export JSON</button><button className="btn-primary" onClick={() => window.print()}>Print / PDF</button>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         {[["Score", `${s.runs}/${s.wickets}`], ["Balls", String(st.legal)], ["Boundaries", String(st.boundaries)], ["Dot %", st.dotPct.toFixed(0)], ["Avg speed", `${st.avgKph.toFixed(0)} km/h`], ["Sweet-spot %", st.sweetPct.toFixed(0)]].map(([k, v]) => <div key={k} className="stat"><div className="label !mb-0">{k}</div><div className="text-xl font-bold">{v}</div></div>)}
       </div>
+      <QualityBanner mode={s.mode} balls={s.balls} />
       {rep ? <ExecutiveDebrief r={rep} /> : <div className="card text-sm text-white/60">Writing your dossier…</div>}
       <ReplayReel clips={clips} />
       {hasBowl && <BowlingReport balls={s.balls} style={s.config.bowlerStyle} />}

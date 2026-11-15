@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/selfcheck.ts && tsx scripts/checks.ts",
+    "test": "tsx scripts/selfcheck.ts && tsx scripts/checks.ts && tsx scripts/upload-checks.ts",
+    "validate": "tsx scripts/validate.ts",
+    "test:full": "npm test && npm run validate",
     "vendor:models": "node scripts/vendor-mediapipe.mjs",
     "postinstall": "node scripts/vendor-mediapipe.mjs"
   },

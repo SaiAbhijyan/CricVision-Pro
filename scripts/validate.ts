@@ -14,7 +14,7 @@ const spec = (o: Partial<DeliverySpec> = {}): DeliverySpec => ({ release: { x: -
 
 interface Case { name: string; end: "batter" | "bowler"; fps: number; kph: number; bounceY: number; bounceX: number; swing: number; bg: number; ball: number; noise: number; distractor?: boolean; res?: [number, number] }
 const cases: Case[] = [];
-for (const end of ["batter", "bowler"] as const) for (const fps of [30, 60, 120, 240]) for (const kph of [95, 125, 145]) {
+for (const end of ["batter", "bowler"] as const) for (const fps of [30, 60, 120, 240]) for (const kph of [95, 110, 125, 145]) {
   cases.push({ name: `${end}-end ${fps}fps ${kph}kph red-on-pitch`, end, fps, kph, bounceY: 14.5, bounceX: 0.1, swing: 0, bg: 118, ball: 75, noise: 3 });
 }
 const fails: string[] = [];
@@ -47,9 +47,9 @@ async function main() {
     if (Math.abs(eX) > 0.2) fails.push(`${c.name}: bounce line error ${eX.toFixed(2)} m > 0.2`);
     if (Math.abs(eS) > 8 && conf > 0.7) fails.push(`${c.name}: ${eS.toFixed(1)} km/h wrong but confidence ${conf.toFixed(2)}`);
     errs.speed.push(eS); errs.bounceY.push(eY); errs.bounceX.push(eX);
-    rows.push(`${c.name.padEnd(40)} pts=${String(b.quality?.trackPoints).padStart(3)} rms=${b.quality?.fitRmsPx} speed ${b.speedKph?.toFixed(1)} (truth ${clip.truth.speedKph.toFixed(1)}, ${eS >= 0 ? "+" : ""}${eS.toFixed(1)})  bounceY err ${eY.toFixed(2)} m  bounceX err ${eX.toFixed(2)} m  sig ±${b.quality?.speedSigmaKph} conf ${b.quality?.confidence.toFixed(2)}  ${Date.now() - t0} ms`);
+    const row = `${c.name.padEnd(40)} pts=${String(b.quality?.trackPoints).padStart(3)} rms=${b.quality?.fitRmsPx} speed ${b.speedKph?.toFixed(1)} (truth ${clip.truth.speedKph.toFixed(1)}, ${eS >= 0 ? "+" : ""}${eS.toFixed(1)})  bounceY err ${eY.toFixed(2)} m  bounceX err ${eX.toFixed(2)} m  sig ±${b.quality?.speedSigmaKph} conf ${b.quality?.confidence.toFixed(2)}  ${Date.now() - t0} ms`;
+    rows.push(row); console.log(row);
   }
-  console.log(rows.join("\n"));
   const stat = (a: number[]) => a.length ? `mean ${(a.reduce((s, x) => s + x, 0) / a.length).toFixed(2)}, mean|err| ${(a.reduce((s, x) => s + Math.abs(x), 0) / a.length).toFixed(2)}, max|err| ${Math.max(...a.map(Math.abs)).toFixed(2)}` : "n/a";
   console.log(`\ndetected ${det}/${tot}\nspeed km/h: ${stat(errs.speed)}\nbounce y m: ${stat(errs.bounceY)}\nbounce x m: ${stat(errs.bounceX)}`);
   if (fails.length) { console.log("\nFAILED:\n" + fails.join("\n")); process.exit(1); }

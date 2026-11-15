@@ -7,7 +7,7 @@ import { flightFromState, simulateDelivery, type DeliverySpec } from "../lib/phy
 import { batterDNA, bowlerDNA, zoneOf, slope, type SessionLike } from "../lib/analytics/profile";
 import { sanitizeBall, sanitizeSession, safeText } from "../lib/security/sanitize";
 import { takeToken, _resetRateLimits } from "../lib/security/rate-limit";
-import { assertSameOrigin, readJson } from "../lib/security/request";
+import { rateLimit, assertSameOrigin, readJson } from "../lib/security/request";
 import { ballDigest } from "../lib/coach/digest";
 import { generateBatter, defaultBatter } from "../lib/sim/synth-pose";
 import { extractBatting } from "../lib/cv/biomech";
@@ -152,6 +152,13 @@ async function main() {
   ok((await readJson(post(JSON.stringify({ a: "x".repeat(500) })), 100)) === null, "oversized JSON refused");
   ok((await readJson(post("not json"), 100)) === null, "invalid JSON refused");
   ok((await readJson(post('{"a":1}', "text/plain"), 100)) === null, "wrong content type refused");
+
+  { // a caller rotating a spoofed X-Forwarded-For still hits the shared budget
+    _resetRateLimits();
+    let allowed = 0, blocked = 0;
+    for (let i = 0; i < 400; i++) { const r = rateLimit(new Request("https://app.example/x", { method: "POST", headers: { "x-forwarded-for": `10.0.${i >> 8}.${i & 255}` } }), "spoof", 6, 0.05); if (r === null) allowed++; else blocked++; }
+    ok(allowed === 120 && blocked === 280, `shared bucket caps spoofed clients (allowed ${allowed})`);
+    _resetRateLimits(); }
 
   // ---- centre of mass / weight transfer ----
   {

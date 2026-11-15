@@ -65,16 +65,17 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
   };
   const times = obs.map((o) => o.t - first.t);
   const pts0 = use ? use.filter(Boolean).length : obs.length;
-  const cost = (x: number[]) => {
+  /** Mean squared pixel error (+ weak priors). `tau2` truncates each point's squared error: a solution that explains most of the
+   *  track beats one that fits a subset perfectly and leaves the rest 20 px off, and a few lost or mis-tracked points cannot dominate. */
+  const mkCost = (tau2: number) => (x: number[]) => {
     if (x[2] < 0.05 || x[2] > 3.5 || Math.abs(x[6]) > 7 || Math.abs(x[7]) > 3000) return 1e9;
     const pts = sample(x, times);
-    let e = 0;
-    let cnt = 0;
+    let e = 0, cnt = 0;
     for (let i = 0; i < pts.length; i++) {
       if (use && !use[i]) continue;
       const p = project(cam, pts[i]);
       if (!p) return 1e9;
-      e += (p.x - obs[i].px.x) ** 2 + (p.y - obs[i].px.y) ** 2; cnt++;
+      e += Math.min(tau2, (p.x - obs[i].px.x) ** 2 + (p.y - obs[i].px.y) ** 2); cnt++;
     }
     // weak ridge prior: a straight, non-spinning ball unless the pixels clearly say otherwise (stops noise becoming "swing")
     // plausible pace: a delivery is 50-170 km/h at the first observation. One camera leaves speed and depth partly ambiguous, so
@@ -83,6 +84,7 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
     const pace = sp < lo ? (lo - sp) ** 2 : sp > hi ? (sp - hi) ** 2 : 0;
     return e / Math.max(1, cnt) + 4 * pace + 0.4 * (x[6] / 3) ** 2 + 0.4 * (x[7] / 1500) ** 2;
   };
+  const costQ = mkCost(Infinity), cost = mkCost(25);   // 5 px truncation
   // Multi-start: a single guess is not enough for a one-camera fit because the height of the first/last observation is
   // unknown. Back-project both ends at several plausible heights, take gravity into account, and refine the best few.
   // The flight is a boundary-value problem: back-project the first and last observation at heights (zA, zB), then the
@@ -102,14 +104,15 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
   }
   if (!cells.length) return null;
   cells.sort((u, v) => u.c - v.c);
-  const free6 = (x: number[]) => nelderMead((q) => cost([...q, 0, 0]), x.slice(0, 6), [0.2, 0.4, 0.2, 0.5, 1.2, 0.5], { maxIter: 500, tol: 1e-7 }).x;
+  const free6 = (x: number[]) => nelderMead((q) => costQ([...q, 0, 0]), x.slice(0, 6), [0.2, 0.4, 0.2, 0.5, 1.2, 0.5], { maxIter: 500, tol: 1e-7 }).x;
   let best: { x: number[]; fx: number } | null = null;
   for (const st of cells.slice(0, 14)) {
     const g = [...free6(st.x), 0, 0];
-    let r = nelderMead(cost, g, [0.1, 0.2, 0.1, 0.3, 0.8, 0.3, 1, 400], { maxIter: 600, tol: 1e-8 });
-    r = nelderMead(cost, r.x, [0.04, 0.08, 0.04, 0.12, 0.3, 0.12, 0.4, 150], { maxIter: 400, tol: 1e-9 });
+    let r = nelderMead(costQ, g, [0.1, 0.2, 0.1, 0.3, 0.8, 0.3, 1, 400], { maxIter: 600, tol: 1e-8 });   // smooth basin first
+    r = nelderMead(cost, r.x, [0.05, 0.1, 0.05, 0.15, 0.4, 0.15, 0.5, 200], { maxIter: 500, tol: 1e-9 });   // then the truncated objective
+    r = nelderMead(cost, r.x, [0.02, 0.04, 0.02, 0.06, 0.15, 0.06, 0.2, 80], { maxIter: 300, tol: 1e-10 });
     if (!best || r.fx < best.fx) best = r;
-    if (best.fx < 1.8) break;
+    if (best.fx < 1.2) break;
   }
   if (!best) return null;
   const x = best.x;
@@ -126,12 +129,27 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
     const dChi = (pts0 * dCost) / sigma2;
     sigKph = Math.min(sigKph, (Math.abs(Math.hypot(r.x[3], r.x[4], r.x[5]) - sp0) * 3.6) / Math.sqrt(Math.max(dChi, 1e-6)));
   }
+  // A wide check for a second, nearly-as-good solution: pin the speed 18% away and re-optimise from several heights. If the residual
+  // barely grows, the track cannot tell those speeds apart (speed/depth ambiguity) however tight the local curvature looks.
+  let wideRise = Infinity;
+  for (const f of [0.82, 1.2]) {
+    const tgt = sp0 * f;
+    const pinned = (q: number[]) => cost(q) + 400 * (Math.hypot(q[3], q[4], q[5]) - tgt) ** 2;
+    for (const dz of [0, 0.5, -0.5]) {
+      const g = x.slice(); g[3] *= f; g[4] *= f; g[5] *= f; g[2] += dz; g[1] += (f - 1) * -3;
+      const r = nelderMead(pinned, g, [0.1, 0.2, 0.1, 0.3, 0.8, 0.3, 0.6, 200], { maxIter: 600, tol: 1e-8 });
+      if (Math.abs(Math.hypot(r.x[3], r.x[4], r.x[5]) - tgt) < 0.05 * tgt) wideRise = Math.min(wideRise, cost(r.x) - best.fx);
+    }
+  }
+  if (wideRise < Math.max(0.6, 0.5 * best.fx)) sigKph = Math.max(sigKph === Infinity ? 0 : sigKph, 0.18 * sp0 * 3.6);
   const pts = sample(x, times);
+  let sq = 0, nn = 0;
+  for (let i = 0; i < pts.length; i++) { if (use && !use[i]) continue; const p = project(cam, pts[i]); if (p) { sq += (p.x - obs[i].px.x) ** 2 + (p.y - obs[i].px.y) ** 2; nn++; } }
   return {
     release: { x: x[0], y: x[1], z: x[2] },
     velocity: { x: x[3], y: x[4], z: x[5] },
     speedMs: Math.hypot(x[3], x[4], x[5]),
-    rmsPx: Math.sqrt(best.fx),
+    rmsPx: Math.sqrt(sq / Math.max(1, nn)),
     samples: pts.map((p, i) => ({ t: times[i], p })),
     swingAccel: x[6],
     turnRpm: x[7],

@@ -21,6 +21,7 @@ export default function Home() {
       <div className="flex flex-wrap gap-3">
         <button className="btn-primary" onClick={() => go("sim")}>Start virtual match simulator</button>
         <button className="btn" onClick={() => go("live")}>Start live camera session</button>
+        <button className="btn" onClick={() => { localStorage.setItem("cvp-config", JSON.stringify(cfg)); router.push("/analyse"); }}>Analyse a video clip</button>
       </div>
       {past.length > 0 && (
         <section className="card">

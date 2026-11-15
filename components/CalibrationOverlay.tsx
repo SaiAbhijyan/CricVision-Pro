@@ -7,8 +7,8 @@ import { virtualCalibration } from "@/lib/sim/virtual-camera";
 const NAMES = ["Bowler-left", "Bowler-right", "Batter-right", "Batter-left"];
 
 /** 10-second 4-corner calibration (pitch corners at the popping creases) + stump-top anchor, drawn over the live video. */
-export default function CalibrationOverlay({ width, height, onLock }: { width: number; height: number; onLock: (c: Calibration) => void }) {
-  const init = useRef(virtualCalibration(width, height));
+export default function CalibrationOverlay({ width, height, onLock, labels = NAMES, initial }: { width: number; height: number; onLock: (c: Calibration) => void; /** corner names in on-screen order (top-left, top-right, bottom-right, bottom-left) */ labels?: string[]; initial?: Calibration }) {
+  const init = useRef(initial ?? virtualCalibration(width, height));
   const [corners, setCorners] = useState<Pt[]>(init.current.corners);
   const [top, setTop] = useState<Pt>(init.current.stumpTop);
   const [left, setLeft] = useState(10);
@@ -39,7 +39,7 @@ export default function CalibrationOverlay({ width, height, onLock }: { width: n
     <div className="absolute inset-0">
       <svg ref={svg} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-full w-full touch-none" onPointerMove={move} onPointerUp={() => setDrag(null)}>
         <polygon points={corners.map((c) => `${c.x},${c.y}`).join(" ")} fill="#b6ff3c22" stroke="#b6ff3c" strokeWidth={3} />
-        {corners.map((c, i) => <g key={i} onPointerDown={(e) => { (e.target as Element).setPointerCapture?.(e.pointerId); setDrag(i); setLeft(10); }}><circle cx={c.x} cy={c.y} r={16} fill="#b6ff3c" /><text x={c.x + 20} y={c.y - 10} fill="#fff" fontSize={20}>{NAMES[i]}</text></g>)}
+        {corners.map((c, i) => <g key={i} onPointerDown={(e) => { (e.target as Element).setPointerCapture?.(e.pointerId); setDrag(i); setLeft(10); }}><circle cx={c.x} cy={c.y} r={16} fill="#b6ff3c" /><text x={c.x + 20} y={c.y - 10} fill="#fff" fontSize={20}>{labels[i] ?? NAMES[i]}</text></g>)}
         <g onPointerDown={(e) => { (e.target as Element).setPointerCapture?.(e.pointerId); setDrag(4); setLeft(10); }}><circle cx={top.x} cy={top.y} r={14} fill="#ffd34d" /><text x={top.x + 18} y={top.y + 6} fill="#fff" fontSize={20}>Stump top (71.1 cm)</text></g>
       </svg>
       <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center gap-3 rounded-lg bg-black/70 p-3 text-sm">

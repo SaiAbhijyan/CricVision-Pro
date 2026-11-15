@@ -23,9 +23,15 @@ export function assertSameOrigin(req: Request): NextResponse | null {
 }
 const forbidden = () => NextResponse.json({ error: "forbidden" }, { status: 403, headers: JSON_HEADERS });
 
+/**
+ * Per-client bucket plus one shared bucket per scope (20x the per-client budget). The client key comes from a forwarded header
+ * that a direct caller can spoof, so the shared bucket is what bounds total spend on the paid model endpoints regardless.
+ */
 export function rateLimit(req: Request, scope: string, capacity: number, refillPerSec: number): NextResponse | null {
   const r = takeToken(`${scope}:${clientKey(req)}`, { capacity, refillPerSec });
-  return r.ok ? null : NextResponse.json({ error: "rate limited" }, { status: 429, headers: { ...JSON_HEADERS, "Retry-After": String(r.retryAfterSec) } });
+  if (!r.ok) return NextResponse.json({ error: "rate limited" }, { status: 429, headers: { ...JSON_HEADERS, "Retry-After": String(r.retryAfterSec) } });
+  const g = takeToken(`${scope}:*`, { capacity: capacity * 20, refillPerSec: refillPerSec * 20 });
+  return g.ok ? null : NextResponse.json({ error: "busy, try again shortly" }, { status: 429, headers: { ...JSON_HEADERS, "Retry-After": String(g.retryAfterSec) } });
 }
 
 /** Read a JSON body with a hard byte cap (the Content-Length header is advisory, so the stream is counted too). */

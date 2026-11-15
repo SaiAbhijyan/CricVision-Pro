@@ -487,7 +487,7 @@ Without a key the coach runs in offline mode.
 
 ## 7. Testing
 
-`npm test` runs `scripts/selfcheck.ts` and `scripts/checks.ts` (73 assertions, including centre of gravity: movement vs normal delivery, Player DNA, sanitizer, rate limit). The first covers: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
+`npm test` runs `scripts/selfcheck.ts`, `scripts/checks.ts` and `scripts/upload-checks.ts` (upload path, 100+ assertions); `npm run validate` runs the 32-case synthetic accuracy matrix (slow); `npm run test:full` runs both. See `docs/VALIDATION.md` for results and what is not yet proven. `scripts/checks.ts` has 74 assertions, including centre of gravity: movement vs normal delivery, Player DNA, sanitizer, rate limit). The first covers: physics sanity (bounce, swing), MCC rules, the full simulator, the audio onset detector (synthetic clicks in noise), the frame ring (eviction and nearest lookup), and the offline report. `npm run typecheck` and `npm run build` must also pass.
 
 ## 8. Known limitations
 
@@ -496,7 +496,8 @@ Without a key the coach runs in offline mode.
 * **Model names.** `gemini-4-hydrogen` and `gemini-4-carbon` follow the project specification; change them in `.env.local` if your account uses different IDs.
 * **Network assets.** The MediaPipe WASM and pose model load from a CDN by default; run `npm run vendor:models` and set `NEXT_PUBLIC_SELF_HOST_ONLY=1` to self-host.
 * **Swing and spin from one camera** are approximate (see 4.14). Bat speed is an estimate.
-* **Security trade-offs** (CSP `unsafe-inline`, in-memory rate limit) are listed in SECURITY.md.
+* **Uploaded clips** (`/analyse`) need a fixed camera and are estimates, not radar-validated (see `docs/VALIDATION.md`).
+* **Security trade-offs** (in-memory rate limit per instance) are listed in SECURITY.md; scripts use a per-request CSP nonce.
 * **Audio.** Input latency differs per device; tune `audioOffsetMs`. The analyser fallback is about 12 ms precise.
 
 ## 9. Regenerating the figures and video

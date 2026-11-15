@@ -17,7 +17,7 @@ class OnsetCore {
     this.sr = sr; this.k = o.k || 8; this.absMin = o.absMin || 0.012; this.refr = Math.round((o.refractoryMs || 80) * sr / 1000);
     this.win = Math.round(0.02 * sr);
     this.hp = this._bq('hp', 2000, 0.707); this.lp = this._bq('lp', 5000, 0.707); this.lo = this._bq('lp', 800, 0.707);
-    this.floor = 0.001; this.floorA = 1 - Math.exp(-1 / (0.5 * sr));
+    this.floor = o.floor0 || 0.001; this.floorA = 1 - Math.exp(-1 / (0.5 * sr));
     this.hist = new Float32Array(96); this.hi = 0;
     this.n = 0; this.state = 0; this.cool = 0; this.ev = null;
   }
@@ -74,7 +74,7 @@ export interface OnsetEvent { onsetSample: number; peak: number; ratio: number; 
 export interface OnsetCoreLike { process(block: Float32Array): OnsetEvent[] }
 
 /** Instantiate the core outside a worklet (Node self-check, main-thread fallback). */
-export function createOnsetCore(sampleRate: number, opts?: { k?: number; absMin?: number; refractoryMs?: number }): OnsetCoreLike {
+export function createOnsetCore(sampleRate: number, opts?: { k?: number; absMin?: number; refractoryMs?: number; floor0?: number }): OnsetCoreLike & { floor?: number } {
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   return new Function(`${ONSET_CORE_SOURCE}; return new OnsetCore(${sampleRate}, ${JSON.stringify(opts ?? {})});`)() as OnsetCoreLike;
 }

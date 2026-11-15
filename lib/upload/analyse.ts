@@ -118,11 +118,12 @@ export async function analyseClip(src: ClipSource, o: AnalyseOptions): Promise<A
     if (!obs) { diag.reason = "The ball was tracked for too few frames before contact to analyse."; return; }
     const fr = await fit(model, obs, cfg.surface);
     if (!fr) { diag.reason = "The flight fit failed."; return; }
+    if (fr.rmsPx > 15) { diag.reason = `The tracked points do not follow a ball flight (fit error ${fr.rmsPx.toFixed(0)} px). This usually means the camera moved or zoomed, or something other than the ball was followed.`; return; }
     const res = buildLiveBall({ fit: fr, cfg, cam: model, field, score, index: balls.length, startedAt: Date.now(), bowlerFrames: win(bowler), batterFrames: win(batter), track: pts, impact: hit });
     if (!res) { diag.reason = "The delivery could not be assembled."; return; }
     const r = res.record;
     // a short track cannot support a tight profile-likelihood: floor the uncertainty so a 13-point fit is never shown as +/-2 km/h
-    const sigEff = Math.max(fr.speedSigmaKph, obs.length < 16 ? 8 : obs.length < 25 ? 3 : 0);
+    const sigEff = Math.max(fr.speedSigmaKph, obs.length < 16 ? (src.fps < 45 ? 20 : 8) : obs.length < 25 ? 3 : 0);
     const ys = fr.samples.map((q) => q.p.y), cov = Math.max(0, Math.min(1, (Math.max(...ys) - Math.min(...ys)) / 20.12));
     const fc = flightConfidence(obs.length, fr.rmsPx, src.fps, { speedKph: fr.speedMs * 3.6, releaseY: fr.release.y, coverage: cov, speedSigmaKph: sigEff });
     const q: AnalysisQuality = { trackPoints: obs.length, fitRmsPx: +fr.rmsPx.toFixed(2), speedSigmaKph: sigEff, contact, bowlerPoseFrames: win(bowler).length, batterPoseFrames: win(batter).length, confidence: fc.confidence, warnings: fc.warnings };
@@ -150,6 +151,16 @@ export async function analyseClip(src: ClipSource, o: AnalyseOptions): Promise<A
     if (k % 5 === 0) o.onProgress?.(k, src.frameCount, `Frame ${k + 1} of ${src.frameCount}`);
   }
   if (dt.inDelivery && !o.signal?.aborted) await finalize(dt.tLast);
+  if (dt.frames > 20 && dt.dupes / dt.frames > 0.05) {
+    const m = `${Math.round((100 * dt.dupes) / dt.frames)}% of the frames in this clip are exact repeats (a frame-rate-converted or re-encoded file). Timing and positions are less exact, so speed can be off by 10-20 km/h. Use the original recording if you have it.`;
+    warnings.push(m);
+    for (const b of balls) if (b.quality) { b.quality.speedSigmaKph = Math.max(b.quality.speedSigmaKph ?? 0, 15); b.quality.confidence = Math.min(b.quality.confidence, 0.6); b.quality.warnings.push(m); }
+  }
+  if (dt.busyShare > 0.2) {
+    const m = `The picture changes between frames across ${Math.round(dt.busyShare * 100)}% of this clip, which happens with a panning or zooming camera and with heavy compression. Ball tracking needs a steady camera (tripod or fixed mount); speeds from this clip are unreliable.`;
+    warnings.push(m);
+    for (const b of balls) if (b.quality) { b.quality.confidence = Math.min(b.quality.confidence, 0.35); b.quality.warnings.push(m); }
+  }
   if (!balls.length) warnings.push("No delivery was found. Check the calibration, that the ball is visible, and the slow-motion setting.");
   applyDisguiseScores(balls);
   o.onProgress?.(src.frameCount, src.frameCount, "Done");

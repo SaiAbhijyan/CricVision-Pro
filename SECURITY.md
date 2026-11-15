@@ -10,7 +10,7 @@ The browser is untrusted. Vision and physics run on the device; only a compact t
 - **Self-hosting.** `npm run vendor:models` copies MediaPipe assets locally; `NEXT_PUBLIC_SELF_HOST_ONLY=1` removes CDN origins from the CSP.
 
 ## Known limits
-- CSP keeps `script-src 'unsafe-inline'` (Next.js inline bootstraps) and `'wasm-unsafe-eval'` (MediaPipe). Nonce-based CSP would remove the first.
+- CSP is built per request in `middleware.ts` with a script nonce (no `unsafe-inline` scripts; every page renders per request). `'wasm-unsafe-eval'` stays for MediaPipe. `style-src` keeps `unsafe-inline` (Tailwind/React inline styles).
 - The rate limiter is in memory, so it is per server instance. Use a shared store when scaled out.
 - Monocular live tracking is approximate: speed about ±2 km/h, pitch point about 10 cm; swing and spin magnitudes can be off by up to about 15 cm and are partly confounded. Bat speed is an estimate from hand speed.
 - The live camera path has not been validated on real hardware.
