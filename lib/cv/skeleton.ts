@@ -110,3 +110,31 @@ export function angleBetween(u: Vec3, v: Vec3): number {
   const d = dot(u, v) / ((len(u) * len(v)) || 1e-9);
   return (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
 }
+
+/**
+ * Lift a MediaPipe detection into world space for a long-lens, fixed camera behind the bowler (typical broadcast and
+ * tripod footage). With a long lens the picture is nearly orthographic, so a calibrated 4-corner homography is not
+ * needed: the hip centre is placed from its pixel position at a known scale, and the body shape comes from MediaPipe's
+ * metric world landmarks, tilted by the camera's downward pitch.
+ *  - `metresPerPx`  scale at the batter, e.g. 3.05 m pitch width / its width in pixels
+ *  - `refPx`        the pixel column that is the pitch centre line
+ *  - `pitchDeg`     how far the camera looks down (about 10-20 deg for broadcast)
+ *  - `hipY`         world Y given to the hip centre (the batter stays near the crease; stride comes from the body shape)
+ */
+export function liftWeakPerspective(
+  img: { x: number; y: number }[], wld: Vec3[], t: number,
+  o: { metresPerPx: number; refPx: number; imageWidth: number; pitchDeg: number; hipY: number },
+): Skeleton | null {
+  if (img.length < 33 || wld.length < 33) return null;
+  const th = (o.pitchDeg * Math.PI) / 180, s = Math.sin(th), c = Math.cos(th);
+  const off = {} as Joints;
+  for (const k of JOINTS) { const w = wld[MP_INDEX[k]]; off[k] = { x: w.x, y: -w.y * s + w.z * c, z: -w.y * c - w.z * s }; }
+  const ankleZ = (off.lAnk.z + off.rAnk.z) / 2;
+  const hipH = Math.max(0.6, -ankleZ + 0.07);
+  const hx = ((img[23].x + img[24].x) / 2) * o.imageWidth;
+  const P = { x: (hx - o.refPx) * o.metresPerPx, y: o.hipY, z: hipH };
+  const hm = { x: (off.lHip.x + off.rHip.x) / 2, y: (off.lHip.y + off.rHip.y) / 2, z: (off.lHip.z + off.rHip.z) / 2 };
+  const j = {} as Joints;
+  for (const k of JOINTS) j[k] = { x: P.x + off[k].x - hm.x, y: P.y + off[k].y - hm.y, z: P.z + off[k].z - hm.z };
+  return { t, j };
+}

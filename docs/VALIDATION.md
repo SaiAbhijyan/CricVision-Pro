@@ -18,6 +18,12 @@ Also verified: 103 upload assertions (`scripts/upload-checks.ts`: file validatio
 ## Swing-only analysis (batting without a ball)
 Uploaded clips and the live camera now also analyse a batter's swings when no ball is tracked: each swing is found from the hands' peak speed, then the same weight-transfer, bat-speed, swing-plane and head-movement numbers are produced. Timing against the ball, shot and runs are not available and the report says so. Verified on synthetic batters (found, ignored on a leave, two swings in one clip, no repeats live, server sanitiser keeps the flag, report renders in the browser). Not verified on real footage: it needs the pose model, which the test sandbox cannot download. Bat speed is an estimate (about 3x hand speed), not validated.
 
+## Real pose on real footage (Kohli clip)
+`scripts/real-pose.cjs` runs MediaPipe Pose (legacy npm solution, model bundled, works offline) on a real video in headless Chrome; `scripts/real-swing.ts` turns it into skeletons with a long-lens lift and runs the swing analysis.
+- Broadcast clip, 1080p30, slow-motion single delivery, batter filling about 40% of the frame. The skeleton follows the body, bat hands and feet well through the stance, forward defence and follow-through (checked by overlay), with 119 of 120 frames tracked on the batter.
+- The shot is a defence, not a drive. Stance, head and weight numbers are usable. **Bat speed is not**: the slow-motion factor is unknown (4x gives 170 km/h, clamped, which is not credible) and hand speed is noisy at this resolution, so any bat speed from broadcast slow-motion is unreliable. The upload screen asks for the slow-motion factor for this reason; a wrong factor makes every speed wrong.
+- The Starc clip cannot give ball swing: the broadcast camera pans and zooms, so the ball track fails (fit error 73 px) and the app refuses it. Ball swing needs a fixed camera.
+
 ## What is not proven
 - **No radar-gun comparison yet.** Every speed is labelled an estimate in the UI. To validate: record a delivery with a radar or use a broadcast clip with an on-screen speed, enter the reading, compare. Target: ±5 km/h.
 - **Pose on real footage** (needs the MediaPipe model; not exercised in CI).

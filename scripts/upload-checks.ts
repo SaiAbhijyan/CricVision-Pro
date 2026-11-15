@@ -10,6 +10,7 @@ import { analyseClip, flightConfidence, type ClipSource } from "../lib/upload/an
 import { mp4Fps } from "../lib/upload/mp4";
 import { readFileSync, existsSync } from "fs";
 import { generateBatter, defaultBatter } from "../lib/sim/synth-pose";
+import { liftWeakPerspective } from "../lib/cv/skeleton";
 import { detectSwings, finishedSwings } from "../lib/upload/swing";
 import { sanitizeBall } from "../lib/security/sanitize";
 import { renderClip, rng, gauss } from "./lib/synth-clip";
@@ -257,6 +258,15 @@ async function main() {
     const rb = await analyseClip(mk(one), { cfg: { ...batCfg, mode: "Bowling Focus" }, cal: mkCal("batter"), impacts: [] });
     ok(rb.balls.length === 0, "bowling-focus sessions do not produce swing records");
     ok(detectSwings(one.slice(0, 5)).length === 0, "too few pose frames give no swings"); }
+
+  { // long-lens lift: an upright figure stays upright, scale and position follow the pixels
+    const img = Array.from({ length: 33 }, (_, i) => ({ x: 0.5 + (i === 23 || i === 24 ? 0.05 * (i === 23 ? -1 : 1) : 0), y: 0.5 + i * 0.01 }));
+    const wld = Array.from({ length: 33 }, (_, i) => ({ x: i === 23 ? -0.1 : i === 24 ? 0.1 : 0, y: i === 27 || i === 28 ? 0.9 : i === 23 || i === 24 ? 0 : -0.3, z: 0 }));
+    const a = liftWeakPerspective(img, wld, 0, { metresPerPx: 0.004, refPx: 960, imageWidth: 1920, pitchDeg: 15, hipY: 19 });
+    const b = liftWeakPerspective(img.map((p) => ({ ...p, x: p.x + 0.1 })), wld, 0, { metresPerPx: 0.004, refPx: 960, imageWidth: 1920, pitchDeg: 15, hipY: 19 });
+    ok(!!a && !!b && a.j.nose.z > a.j.lAnk.z + 1.0, "long-lens lift: head above feet");
+    ok(!!a && !!b && Math.abs((b.j.lHip.x - a.j.lHip.x) - 0.1 * 1920 * 0.004) < 1e-6, "long-lens lift: moving 10% of the frame moves the body by pixels x scale");
+    ok(liftWeakPerspective([], [], 0, { metresPerPx: 0.004, refPx: 0, imageWidth: 1, pitchDeg: 0, hipY: 0 }) === null, "long-lens lift: bad input gives null"); }
 
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
