@@ -16,6 +16,7 @@ import { buildField, defaultFieldPreset, applyDisguiseScores } from "@/lib/sim/m
 import { applyOutcome, newScore, type ScoreState } from "@/lib/rules/scoreboard";
 import { liveCoach } from "@/lib/coach/client";
 import { putClip, putSession } from "@/lib/storage/idb";
+import { finishedSwings } from "@/lib/upload/swing";
 import Scoreboard from "./Scoreboard";
 import FieldRadar from "./FieldRadar";
 import CalibrationOverlay from "./CalibrationOverlay";
@@ -81,7 +82,7 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
     try { const a = await imp.start(); setAudio(`${a.mode} @ ${a.sampleRate} Hz`); } catch (e) { setAudio(`mic unavailable (${(e as Error).message})`); }
     setStatus("Live. Bowl when ready.");
 
-    let n = 0, lastT = 0, fps = 30, alive = true, busy = false;
+    let n = 0, lastT = 0, fps = 30, alive = true, busy = false, lastSwingT = -Infinity, lastSwingCheck = 0;
     const meter = setInterval(() => setLevel(imp.level), 100);
     const finalize = async (tEnd: number) => {
       busy = true;
@@ -113,6 +114,13 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
         sg.drawImage(v, 0, 0, sw, sh);
         dt.step(t, toGray(sg.getImageData(0, 0, sw, sh)), fps);
         if (n % (lowPower.current ? 8 : 2) === 0) { const sk = pose.detect(v, t); if (sk.bowler) bowler.push(sk.bowler); if (sk.batter) batter.push(sk.batter); while (bowler.length && bowler[0].t < t - 8) bowler.shift(); while (batter.length && batter[0].t < t - 8) batter.shift(); }
+        // a swing with no ball tracked (shadow batting, throw-downs): analyse it from the body alone, once it has finished
+        if (cfg.mode !== "Bowling Focus" && !dt.inDelivery && !busy && t - lastSwingCheck > 0.5 && batter.length >= 10) {
+          lastSwingCheck = t;
+          for (const x of finishedSwings(batter, cfg.handedness, cfg, Math.max(lastSwingT, dt.tLast), t, balls.current.length, Date.now())) {
+            lastSwingT = x.impactT; balls.current.push(x.record); setNBalls(balls.current.length);
+          }
+        }
         if (n % Math.max(1, Math.round(fps / 30)) === 0) createImageBitmap(small).then((b) => ring.push(t, b)).catch(() => {});
         const lastImp = impacts.current[impacts.current.length - 1];
         if (dt.shouldFinalize(t, lastImp?.tPerf)) void finalize(Math.max(dt.tLast, lastImp?.tPerf ?? 0));

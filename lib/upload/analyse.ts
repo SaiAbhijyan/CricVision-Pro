@@ -9,6 +9,7 @@ import { fitFlightTo2D, type FitResult, type TrackObs } from "@/lib/physics/trac
 import { toGray, type Gray } from "@/lib/cv/ball-detector";
 import type { Skeleton } from "@/lib/cv/skeleton";
 import type { PosePair } from "@/lib/cv/pose";
+import { swingRecords } from "@/lib/upload/swing";
 import { DeliveryTracker } from "@/lib/live/delivery-tracker";
 import { buildLiveBall, fitObs, type TrackPt } from "@/lib/live/pipeline";
 import { applyOutcome, newScore, type ScoreState, type WagonPoint } from "@/lib/rules/scoreboard";
@@ -160,6 +161,13 @@ export async function analyseClip(src: ClipSource, o: AnalyseOptions): Promise<A
     const m = `The picture changes between frames across ${Math.round(dt.busyShare * 100)}% of this clip, which happens with a panning or zooming camera and with heavy compression. Ball tracking needs a steady camera (tripod or fixed mount); speeds from this clip are unreliable.`;
     warnings.push(m);
     for (const b of balls) if (b.quality) { b.quality.confidence = Math.min(b.quality.confidence, 0.35); b.quality.warnings.push(m); }
+  }
+  // footage of a batter with no tracked ball: analyse each swing from the body alone
+  if (cfg.mode !== "Bowling Focus" && batter.length >= 10) {
+    const covered = (t: number) => balls.some((b) => b.batting && diagnostics.some((d) => d.analysed && t >= d.tStart - 0.5 && t <= d.tEnd + 0.8));
+    const sw = swingRecords(batter, cfg.handedness, cfg, balls.length, Date.now()).filter((x) => !covered(x.impactT));
+    for (const x of sw) { balls.push(x.record); wagons.push(undefined); await o.onDelivery?.({ index: x.record.index, tStart: x.impactT - 1.2, tEnd: x.impactT + 0.4, track: [], record: x.record, bowler: [], batter: batter.filter((f) => f.t >= x.impactT - 2.5 && f.t <= x.impactT + 0.4) }); }
+    if (sw.length) warnings.push(`${sw.length} swing${sw.length > 1 ? "s" : ""} analysed from the body alone (no ball tracked): weight transfer, bat speed and swing plane are measured; timing, shot and runs are not.`);
   }
   if (!balls.length) warnings.push("No delivery was found. Check the calibration, that the ball is visible, and the slow-motion setting.");
   applyDisguiseScores(balls);

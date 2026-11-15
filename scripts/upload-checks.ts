@@ -9,6 +9,8 @@ import { detectImpacts, normaliseAudio } from "../lib/upload/audio";
 import { analyseClip, flightConfidence, type ClipSource } from "../lib/upload/analyse";
 import { mp4Fps } from "../lib/upload/mp4";
 import { readFileSync, existsSync } from "fs";
+import { generateBatter, defaultBatter } from "../lib/sim/synth-pose";
+import { detectSwings, finishedSwings } from "../lib/upload/swing";
 import { sanitizeBall } from "../lib/security/sanitize";
 import { renderClip, rng, gauss } from "./lib/synth-clip";
 import type { SessionConfig, Pt } from "../lib/types";
@@ -226,6 +228,35 @@ async function main() {
     ok((await mp4Fps(100, async () => new Uint8Array(100))) === null, "mp4Fps: garbage gives null");
     ok((await mp4Fps(0, async () => new Uint8Array(0))) === null, "mp4Fps: empty gives null");
     const trunc = readFileSync("/tmp/e2e/ball.mp4").subarray(0, 5000); ok((await mp4Fps(trunc.length, async (a, b) => new Uint8Array(trunc.subarray(a, b)))) === null || true, "mp4Fps: truncated file does not throw"); }
+
+  { // swing-only analysis: batters with no ball in the footage
+    const batCfg: SessionConfig = { ...cfg, mode: "Full Match Duel (1v1)" as never };
+    const mk = (sk: ReturnType<typeof generateBatter>, shift = 0): ClipSource => {
+      const blank = { w: 64, h: 36, data: new Uint8ClampedArray(64 * 36).fill(100) };
+      return { analysisWidth: 64, width: 1280, height: 720, fps: 30, frameCount: sk.length, frame: async (k) => ({ t: sk[k].t + shift, gray: blank, pose: { bowler: null, batter: { ...sk[k], t: sk[k].t + shift }, people: 1 } }) };
+    };
+    const one = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 80 }));
+    const sw = detectSwings(one);
+    ok(sw.length === 1 && Math.abs(sw[0] - 0.55) < 0.25, `one swing found near contact (${sw.map((x) => x.toFixed(2))})`);
+    const r = await analyseClip(mk(one), { cfg: batCfg, cal: mkCal("batter"), impacts: [] });
+    ok(r.balls.length === 1 && !!r.balls[0].batting && r.balls[0].speedKph === null, "swing-only record has batting numbers and no ball");
+    ok((r.balls[0]?.batting?.batSpeedKph ?? 0) > 20 && (r.balls[0]?.batting?.frontFootPct ?? 0) > 55, `swing numbers are sensible (bat ${r.balls[0]?.batting?.batSpeedKph}, front ${r.balls[0]?.batting?.frontFootPct})`);
+    ok(r.balls[0]?.quality?.confidence !== undefined && r.balls[0].quality!.confidence <= 0.6, "swing-only confidence is capped");
+    ok(r.warnings.some((x) => /no ball tracked/.test(x)), "user is told the swing was analysed without a ball");
+    const two = [...one, ...generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 30 })).map((f) => ({ ...f, t: f.t + 6 }))];
+    { const fin = finishedSwings(one, "RHB", batCfg, -Infinity, one[one.length - 1].t, 0, 0); ok(fin.length === 1, "live helper emits a finished swing once");
+      ok(finishedSwings(one, "RHB", batCfg, fin[0].impactT, one[one.length - 1].t, 1, 0).length === 0, "live helper does not repeat a swing already recorded");
+      ok(finishedSwings(one, "RHB", batCfg, -Infinity, fin[0].impactT + 0.1, 0, 0).length === 0, "live helper waits for the follow-through"); }
+    ok(detectSwings(two).length === 2, "two swings in one clip are both found");
+    const leave = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, swing: false }));
+    ok(detectSwings(leave).length === 0, "a leave (no stroke) is not a swing");
+    const { offlineReport } = await import("../lib/coach/offline");
+    const rep = offlineReport({ id: "x", startedAt: 0, endedAt: 0, config: batCfg, balls: r.balls, runs: 0, wickets: 0, legalBalls: 0 } as never);
+    ok(/1 swing analysed/.test(rep.headline) && rep.whatWentRight.some((x) => /swing.*measured/.test(x)), "coach report describes swing-only sessions: " + rep.headline);
+    ok(sanitizeBall(r.balls[0])?.flags.includes("Swing only (no ball tracked)") === true, "server sanitizer keeps the swing-only flag");
+    const rb = await analyseClip(mk(one), { cfg: { ...batCfg, mode: "Bowling Focus" }, cal: mkCal("batter"), impacts: [] });
+    ok(rb.balls.length === 0, "bowling-focus sessions do not produce swing records");
+    ok(detectSwings(one.slice(0, 5)).length === 0, "too few pose frames give no swings"); }
 
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

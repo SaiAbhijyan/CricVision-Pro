@@ -33,7 +33,7 @@ const FORMATS = ["Net Free-Hit", "Super Over", "Powerplay Chase"] as const;
  * Flags are produced by the app's own rules, so the server accepts only those exact strings. A character filter cannot
  * stop plain-English prompt injection, an allowlist can: anything else a client puts in `flags` is dropped.
  */
-const KNOWN_FLAGS = /^(?:Bottom-hand dominant|Collapsed front knee|Counter-rotation > 30°|Edge|Elbow extension > 15°|Head drift > 8 cm|Late trigger movement|No-ball: front foot over crease|No-ball: return crease|Unstable back-foot landing|Wide|Boundary [46]|Wicket: (?:bowled|caught|lbw))$/;
+const KNOWN_FLAGS = /^(?:Bottom-hand dominant|Collapsed front knee|Counter-rotation > 30°|Edge|Elbow extension > 15°|Head drift > 8 cm|Late trigger movement|No-ball: front foot over crease|No-ball: return crease|Unstable back-foot landing|Wide|Swing only \(no ball tracked\)|Boundary [46]|Wicket: (?:bowled|caught|lbw))$/;
 
 /** Letters, digits, spaces and a few punctuation marks only; no newlines, quotes, braces or markup. */
 export const safeText = (x: unknown, max = 60): string | null => {

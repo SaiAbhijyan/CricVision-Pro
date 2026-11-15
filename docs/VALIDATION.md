@@ -15,6 +15,9 @@ The harness validates detector, tracker and fit against **known synthetic physic
 
 Also verified: 103 upload assertions (`scripts/upload-checks.ts`: file validation, frame timing, exact MP4 frame rate, audio impacts under noise/voice/crowd, both camera ends, outliers, duplicate frames, noisy/moving camera flagged, abort, bad calibration), 74 core assertions, and a headless-Chrome run of the production build (H.264 upload, 120 fps auto-detected, calibrate, analyse, report: 124 km/h on a 125 km/h synthetic clip, zero CSP violations).
 
+## Swing-only analysis (batting without a ball)
+Uploaded clips and the live camera now also analyse a batter's swings when no ball is tracked: each swing is found from the hands' peak speed, then the same weight-transfer, bat-speed, swing-plane and head-movement numbers are produced. Timing against the ball, shot and runs are not available and the report says so. Verified on synthetic batters (found, ignored on a leave, two swings in one clip, no repeats live, server sanitiser keeps the flag, report renders in the browser). Not verified on real footage: it needs the pose model, which the test sandbox cannot download. Bat speed is an estimate (about 3x hand speed), not validated.
+
 ## What is not proven
 - **No radar-gun comparison yet.** Every speed is labelled an estimate in the UI. To validate: record a delivery with a radar or use a broadcast clip with an on-screen speed, enter the reading, compare. Target: ±5 km/h.
 - **Pose on real footage** (needs the MediaPipe model; not exercised in CI).

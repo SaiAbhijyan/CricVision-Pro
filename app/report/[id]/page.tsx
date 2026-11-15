@@ -39,6 +39,9 @@ export default function ReportPage() {
   if (s === undefined) return <p className="text-white/50">Loading…</p>;
   if (s === null) return <p>Session not found on this device.</p>;
   const st = sessionStats(s.balls);
+  const swings = s.balls.filter((b) => b.flags.includes("Swing only (no ball tracked)"));
+  const swingOnly = swings.length > 0 && swings.length === s.balls.length;
+  const avgBat = swings.length ? swings.reduce((a, b) => a + (b.batting?.batSpeedKph ?? 0), 0) / swings.length : 0;
   const hasBat = s.balls.some((b) => b.batting), hasBowl = s.balls.some((b) => b.bowling);
   return (
     <div className="space-y-4">
@@ -48,7 +51,7 @@ export default function ReportPage() {
         <button className="btn ml-auto" onClick={download}>Export JSON</button><button className="btn-primary" onClick={() => window.print()}>Print / PDF</button>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        {[["Score", `${s.runs}/${s.wickets}`], ["Balls", String(st.legal)], ["Boundaries", String(st.boundaries)], ["Dot %", st.dotPct.toFixed(0)], ["Avg speed", `${st.avgKph.toFixed(0)} km/h`], ["Sweet-spot %", st.sweetPct.toFixed(0)]].map(([k, v]) => <div key={k} className="stat"><div className="label !mb-0">{k}</div><div className="text-xl font-bold">{v}</div></div>)}
+        {(swingOnly ? [["Swings", String(swings.length)], ["Bat speed", `${avgBat.toFixed(0)} km/h`], ["Front foot", `${(swings.reduce((a, b) => a + (b.batting?.frontFootPct ?? 0), 0) / swings.length).toFixed(0)}%`], ["Head drift", `${(swings.reduce((a, b) => a + Math.abs(b.batting?.headDriftCm ?? 0), 0) / swings.length).toFixed(1)} cm`], ["Downswing", `${(swings.reduce((a, b) => a + (b.batting?.downswingMs ?? 0), 0) / swings.length).toFixed(0)} ms`], ["Swing arc", `${(swings.reduce((a, b) => a + (b.batting?.swingArcCm ?? 0), 0) / swings.length).toFixed(0)} cm`]] : [["Score", `${s.runs}/${s.wickets}`], ["Balls", String(st.legal)], ["Boundaries", String(st.boundaries)], ["Dot %", st.dotPct.toFixed(0)], ["Avg speed", `${st.avgKph.toFixed(0)} km/h`], ["Sweet-spot %", st.sweetPct.toFixed(0)]]).map(([k, v]) => <div key={k} className="stat"><div className="label !mb-0">{k}</div><div className="text-xl font-bold">{v}</div></div>)}
       </div>
       <QualityBanner mode={s.mode} balls={s.balls} />
       {rep ? <ExecutiveDebrief r={rep} /> : <div className="card text-sm text-white/60">Writing your dossier…</div>}
