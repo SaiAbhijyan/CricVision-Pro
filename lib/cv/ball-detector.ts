@@ -44,16 +44,17 @@ export function lucasKanade(prev: Gray, cur: Gray, cx: number, cy: number, r = 4
  *  - blob size gated against the expected ball diameter from the homography (7.15 cm)
  */
 export class BallDetector {
-  private f1: Gray | null = null;
-  private f2: Gray | null = null;
   private corridor: Pt[] = [];
   private mask: Uint8Array | null = null;
   private maskW = 0;
   private maskH = 0;
 
-  constructor(private cam: CameraModel, private scale: number, private threshold = 28) {
+  /** threshold: a fixed gray-level step, or "auto" (default) = 3x the 99th percentile of the frame-difference noise, never below `floor` */
+  constructor(private cam: CameraModel, private scale: number, private threshold: number | "auto" = "auto", private floor = 10) {
     this.rebuildMask();
   }
+  /** last threshold used (diagnostics) */
+  lastThreshold = 0;
 
   setCamera(cam: CameraModel) { this.cam = cam; this.rebuildMask(); }
 
@@ -71,33 +72,50 @@ export class BallDetector {
     this.mask = m; this.maskW = w; this.maskH = h;
   }
 
-  /** Process one frame; returns ball candidates (positions in the downscaled image coordinates). */
-  detect(cur: Gray): Candidate[] {
+  /**
+   * Process one frame; returns ball candidates for the PREVIOUS frame (one frame of latency), in downscaled image coordinates.
+   * Symmetric three-frame difference: a pixel counts only if the middle frame differs from both its predecessor and its
+   * successor, which removes the "ghost" a slow ball leaves where it sat in two earlier frames.
+   */
+  detect(cur: Gray, base = 1): Candidate[] {
     this.ensureMask(cur.w, cur.h);
     const { w, h } = cur;
     const out: Candidate[] = [];
-    const a = this.f1, b = this.f2;
-    if (!a || !b || a.w !== w || a.h !== h) { this.f2 = this.f1; this.f1 = cur; return out; }
+    // frame ring: the window is (prev, mid, next) = (cur - 2*base, cur - base, cur). A wider baseline keeps a slow-moving ball
+    // from cancelling itself against its own earlier position (high frame-rate clips move the ball only a few px per frame).
+    this.ring.push(cur); if (this.ring.length > 2 * base + 1) this.ring.splice(0, this.ring.length - (2 * base + 1));
+    if (this.ring.length < 2 * base + 1 || this.ring[0].w !== w || this.ring[0].h !== h) return out;
+    const a = this.ring[base], b = this.ring[0];
     const bin = new Uint8Array(w * h);
+    const mv = new Uint8Array(w * h);     // min of the two frame differences: the ball must differ from BOTH previous frames
     const mask = this.mask!;
-    const th = this.threshold;
+    const hist = new Uint32Array(256); let nSamp = 0;
     for (let i = 0; i < w * h; i++) {
       if (!mask[i]) continue;
-      const d1 = Math.abs(cur.data[i] - a.data[i]);
-      const d2 = Math.abs(cur.data[i] - b.data[i]);
-      if (d1 > th && d2 > th) bin[i] = 1;
+      const d1 = Math.abs(a.data[i] - b.data[i]), d2 = Math.abs(a.data[i] - cur.data[i]);   // a = middle frame, b = previous, cur = next
+      const m = d1 < d2 ? d1 : d2;
+      mv[i] = m;
+      if ((i & 3) === 0) { hist[m]++; nSamp++; }
     }
+    let th: number;
+    if (this.threshold === "auto") {
+      let acc = 0, p99 = 0; const target = nSamp * 0.99;
+      for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= target) { p99 = v; break; } }
+      th = Math.max(this.floor, this.autoK * p99);
+    } else th = this.threshold;
+    this.lastThreshold = th;
+    for (let i = 0; i < w * h; i++) if (mv[i] > th) bin[i] = 1;
     // connected components (4-neighbour, iterative flood fill)
     const seen = new Uint8Array(w * h);
     const stack: number[] = [];
     for (let i = 0; i < w * h; i++) {
       if (!bin[i] || seen[i]) continue;
-      let area = 0, sx = 0, sy = 0, minx = w, maxx = 0, miny = h, maxy = 0;
+      let area = 0, sx = 0, sy = 0, sw = 0, minx = w, maxx = 0, miny = h, maxy = 0;
       stack.length = 0; stack.push(i); seen[i] = 1;
       while (stack.length) {
         const k = stack.pop()!;
         const x = k % w, y = (k / w) | 0;
-        area++; sx += x; sy += y;
+        area++; const wt = mv[k]; sx += x * wt; sy += y * wt; sw += wt;
         if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
         if (area > 2000) break;
         if (x > 0 && bin[k - 1] && !seen[k - 1]) { seen[k - 1] = 1; stack.push(k - 1); }
@@ -105,53 +123,64 @@ export class BallDetector {
         if (y > 0 && bin[k - w] && !seen[k - w]) { seen[k - w] = 1; stack.push(k - w); }
         if (y < h - 1 && bin[k + w] && !seen[k + w]) { seen[k + w] = 1; stack.push(k + w); }
       }
-      if (area < 2 || area > 400) continue;
+      if (area < 1 || area > 400 || sw <= 0) continue;
       const bw = maxx - minx + 1, bh = maxy - miny + 1;
       const aspect = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
       if (aspect > 4) continue; // a ball (even motion-smeared) is compact; limbs/bats are long
-      const cx = sx / area, cy = sy / area;
+      const cx = sx / sw + 0.5, cy = sy / sw + 0.5;   // pixel centres -> continuous image coordinates
       // size gate using the homography: estimate ground point under the blob, expected ball px at ~1m height
       const g = pixelToGround(this.cam, { x: cx / this.scale, y: cy / this.scale });
       const expPx = expectedBallPx(this.cam, g.x, Math.min(Math.max(g.y, 0), 20.12), 1.0) * this.scale;
       const diam = Math.max(bw, bh);
-      if (expPx > 0 && (diam > expPx * 4 + 6 || diam < expPx * 0.25)) continue;
-      const lk = lucasKanade(a, cur, cx, cy, 4);
+      if (expPx > 0 && diam > expPx * 4 + 6) continue;
+      const lk = area >= 6 ? lucasKanade(b, a, cx, cy, 4) : null;
       out.push({ x: cx, y: cy, area, flow: lk ? { vx: lk.dx, vy: lk.dy } : null });
     }
-    this.f2 = this.f1; this.f1 = cur;
     return out;
   }
 
-  reset() { this.f1 = null; this.f2 = null; }
+  /** noise multiplier for the auto threshold (th = autoK x 99th percentile of the min frame-difference) */
+  autoK = 2.4;
+
+  private ring: Gray[] = [];
+
+  reset() { this.ring = []; }
 }
 
 export interface TrackPoint { t: number; x: number; y: number }
 
-/** Multi-frame ball tracker: Kalman-gated nearest-candidate association with optical-flow velocity updates. */
+/** Multi-frame ball tracker: Kalman-gated nearest-candidate association, seeded from optical flow or from three frames of consistent motion. */
 export class BallTracker {
   private kf: BallKalman | null = null;
   private lastSeen = 0;
   points: TrackPoint[] = [];
   private misses = 0;
+  private recent: { t: number; c: Candidate[] }[] = [];
 
-  constructor(private maxMisses = 6, private gate = 25) {}
+  /** `maxPxPerFrame`: fastest plausible ball motion between frames (analysis pixels) when seeding from candidates alone */
+  constructor(private maxMisses = 6, private gate = 25, private maxPxPerFrame = 0.25) {}
 
   get active() { return this.kf !== null; }
   get predicted(): Pt | null { return this.kf ? this.kf.pos : null; }
 
-  /** `t` in seconds; `fps` used to convert LK px/frame to px/s. */
-  step(t: number, cands: Candidate[], fps: number): TrackPoint | null {
+  /** `t` in seconds; `fps` used to convert LK px/frame to px/s. `frameW` (analysis width) bounds seed speed. */
+  step(t: number, cands: Candidate[], fps: number, frameW = 480): TrackPoint | null {
     if (this.kf) {
       this.kf.predict(t);
-      let best: Candidate | null = null, bd = this.gate;
+      // among gated candidates prefer the larger blob: a ball that overlaps its own earlier positions leaves small "ghost" remnants
+      // there, and the nearest-candidate rule would lock onto them and drag the track backwards
+      let best: Candidate | null = null, bs = Infinity;
       for (const c of cands) {
         const d = this.kf.gate(c.x, c.y);
-        if (d < bd) { bd = d; best = c; }
+        if (d >= this.gate) continue;
+        const sc = (d + 1) / (1 + Math.sqrt(c.area));
+        if (sc < bs) { bs = sc; best = c; }
       }
       if (best) {
         this.kf.update(best.x, best.y, best.flow ? { vx: best.flow.vx * fps, vy: best.flow.vy * fps } : null);
         this.misses = 0; this.lastSeen = t;
-        const p = { t, x: this.kf.x[0], y: this.kf.x[1] };
+        // record the measurement itself: the constant-velocity filter lags a ball that accelerates in the image (perspective), the detection does not
+        const p = { t, x: best.x, y: best.y };
         this.points.push(p);
         return p;
       }
@@ -159,16 +188,44 @@ export class BallTracker {
       if (this.misses > this.maxMisses) { this.kf = null; }
       return null;
     }
-    // initiate a track from the strongest candidate with flow
+    // 1. a candidate with a clear optical-flow velocity starts a track at once
     const seed = cands.filter((c) => c.flow && Math.hypot(c.flow.vx, c.flow.vy) > 1.5).sort((a, b) => b.area - a.area)[0];
     if (seed && seed.flow) {
       this.kf = new BallKalman(seed.x, seed.y, t, seed.flow.vx * fps, seed.flow.vy * fps);
       this.points = [{ t, x: seed.x, y: seed.y }];
-      this.misses = 0; this.lastSeen = t;
+      this.misses = 0; this.lastSeen = t; this.recent = [];
       return this.points[0];
+    }
+    // 2. small balls give no usable flow: look for three detections (not necessarily consecutive frames) on one constant-velocity path
+    this.recent.push({ t, c: cands.slice().sort((p, q) => q.area - p.area).slice(0, 10) }); if (this.recent.length > 6) this.recent.shift();
+    const R = this.recent, n = R.length, vmax = this.maxPxPerFrame * frameW;
+    if (n >= 3) {
+      let best: { a: Candidate; b: Candidate; c: Candidate; ta: number; tb: number; tc: number; score: number } | null = null;
+      const k = n - 1;   // the newest frame must be part of the triple, so a track starts as soon as it exists
+      for (let i = 0; i < k - 1; i++) for (let j = i + 1; j < k; j++) {
+        const dtA = R[j].t - R[i].t, dtB = R[k].t - R[j].t; if (dtA <= 0 || dtB <= 0) continue;
+        for (const a of R[i].c) for (const b of R[j].c) {
+          const dA = Math.hypot(b.x - a.x, b.y - a.y);
+          if (dA < 1.2 * (j - i) || dA > vmax * (j - i)) continue;
+          for (const c of R[k].c) {
+            const px = b.x + ((b.x - a.x) * dtB) / dtA, py = b.y + ((b.y - a.y) * dtB) / dtA;
+            const err = Math.hypot(c.x - px, c.y - py), tol = 1.5 + 0.18 * dA * (dtB / dtA);
+            if (err > tol) continue;
+            const score = err / tol - 0.05 * Math.log(1 + a.area + b.area + c.area);
+            if (!best || score < best.score) best = { a, b, c, ta: R[i].t, tb: R[j].t, tc: R[k].t, score };
+          }
+        }
+      }
+      if (best) {
+        const { a, b, c, ta, tb, tc } = best;
+        this.kf = new BallKalman(c.x, c.y, tc, (c.x - b.x) / (tc - tb), (c.y - b.y) / (tc - tb));
+        this.points = [{ t: ta, x: a.x, y: a.y }, { t: tb, x: b.x, y: b.y }, { t: tc, x: c.x, y: c.y }];
+        this.misses = 0; this.lastSeen = t; this.recent = [];
+        return this.points[this.points.length - 1];
+      }
     }
     return null;
   }
 
-  reset() { this.kf = null; this.points = []; this.misses = 0; }
+  reset() { this.kf = null; this.points = []; this.misses = 0; this.recent = []; }
 }

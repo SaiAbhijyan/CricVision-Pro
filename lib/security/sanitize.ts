@@ -110,6 +110,12 @@ export function sanitizeBall(x: unknown, fallbackIndex = 1): BallRecord | null {
       wicket: oneOf(o.wicket, WICKETS), boundary: o.boundary === 4 || o.boundary === 6 ? o.boundary : null, freeHitNext: o.freeHitNext === true, notes: [],
     },
     flags, clipId: null, synthetic: x.synthetic === true,
+    quality: isObj(x.quality) ? {
+      trackPoints: Math.round(numD(x.quality.trackPoints, 0, 5000)), fitRmsPx: numD(x.quality.fitRmsPx, 0, 1000), contact: oneOf(x.quality.contact, ["audio", "manual", "none"] as const) ?? "none",
+      bowlerPoseFrames: Math.round(numD(x.quality.bowlerPoseFrames, 0, 5000)), batterPoseFrames: Math.round(numD(x.quality.batterPoseFrames, 0, 5000)),
+      speedSigmaKph: x.quality.speedSigmaKph === undefined ? undefined : numD(x.quality.speedSigmaKph, 0, 100),
+      confidence: numD(x.quality.confidence, 0, 1), warnings: [],
+    } : undefined,
   };
 }
 

@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { BallRecord, Calibration, CameraModel, ClipMeta, FieldPlayer, SessionConfig } from "@/lib/types";
 import { buildCameraModel } from "@/lib/physics/homography";
-import { BallDetector, BallTracker, toGray, type TrackPoint } from "@/lib/cv/ball-detector";
+import { toGray } from "@/lib/cv/ball-detector";
+import { DeliveryTracker } from "@/lib/live/delivery-tracker";
 import { PoseTracker } from "@/lib/cv/pose";
 import { FrameRing } from "@/lib/cv/frame-ring";
 import type { Skeleton } from "@/lib/cv/skeleton";
@@ -70,7 +71,7 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
     const scale = SMALL_W / model.imageWidth, sw = SMALL_W, sh = Math.round(model.imageHeight * scale);
     const small = document.createElement("canvas"); small.width = sw; small.height = sh;
     const sg = small.getContext("2d", { willReadFrequently: true })!;
-    const det = new BallDetector(model, scale), trk = new BallTracker();
+    const dt = new DeliveryTracker(model, scale);
     const pose = new PoseTracker(model);
     try { await pose.init(); } catch (e) { setStatus(`Pose model failed to load (${(e as Error).message}); ball tracking only.`); }
     const ring = new FrameRing<ImageBitmap>(FrameRing.forSeconds(6, 30), (f) => f.item.close());
@@ -80,17 +81,18 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
     try { const a = await imp.start(); setAudio(`${a.mode} @ ${a.sampleRate} Hz`); } catch (e) { setAudio(`mic unavailable (${(e as Error).message})`); }
     setStatus("Live. Bowl when ready.");
 
-    let n = 0, lastT = 0, fps = 30, inDel = false, tStart = 0, lastPt = 0, track: TrackPoint[] = [], alive = true, busy = false;
+    let n = 0, lastT = 0, fps = 30, alive = true, busy = false;
     const meter = setInterval(() => setLevel(imp.level), 100);
     const finalize = async (tEnd: number) => {
-      inDel = false; busy = true;
-      const pts: TrackPt[] = track.map((p) => ({ t: p.t, x: p.x / scale, y: p.y / scale }));
+      busy = true;
+      const tStart = dt.tStart;
+      const pts: TrackPt[] = dt.take().map((p) => ({ t: p.t, x: p.x / scale, y: p.y / scale }));
       const win = (a: Skeleton[]) => a.filter((s) => s.t >= tStart - 2.5 && s.t <= tEnd + 0.3);
       const hit = impacts.current.filter((e) => e.tPerf >= tStart - 0.1 && e.tPerf <= tEnd + 0.4).sort((a, b) => b.peak - a.peak)[0] ?? null;
       const obs = fitObs({ track: pts, impact: hit });
       const fit = obs ? await fitInWorker(model, obs, cfg.surface) : null;
       const res = buildLiveBall({ fit, cfg, cam: model, field: fieldRef.current, score: scoreRef.current, index: balls.current.length, startedAt: Date.now(), bowlerFrames: win(bowler), batterFrames: win(batter), track: pts, impact: hit });
-      trk.reset(); track = []; impacts.current = [];
+      impacts.current = [];
       if (!res) { setStatus("Delivery seen but the ball track was too short to analyse."); busy = false; return; }
       const r = res.record; balls.current.push(r);
       const ns = applyOutcome(scoreRef.current, r.outcome, res.wagon); setScore(ns); setNBalls(balls.current.length);
@@ -109,13 +111,11 @@ export default function LiveSession({ cfg }: { cfg: SessionConfig }) {
       const stride = lowPower.current ? 4 : 1;
       if (n % stride === 0 && !busy) {
         sg.drawImage(v, 0, 0, sw, sh);
-        const cands = det.detect(toGray(sg.getImageData(0, 0, sw, sh)));
-        const p = trk.step(t, cands, fps);
-        if (p) { track.push(p); lastPt = t; if (!inDel && track.length >= 4) { inDel = true; tStart = track[0].t; } }
+        dt.step(t, toGray(sg.getImageData(0, 0, sw, sh)), fps);
         if (n % (lowPower.current ? 8 : 2) === 0) { const sk = pose.detect(v, t); if (sk.bowler) bowler.push(sk.bowler); if (sk.batter) batter.push(sk.batter); while (bowler.length && bowler[0].t < t - 8) bowler.shift(); while (batter.length && batter[0].t < t - 8) batter.shift(); }
         if (n % Math.max(1, Math.round(fps / 30)) === 0) createImageBitmap(small).then((b) => ring.push(t, b)).catch(() => {});
         const lastImp = impacts.current[impacts.current.length - 1];
-        if (inDel && ((!trk.active && t - lastPt > 0.5) || (lastImp && t - lastImp.tPerf > 1.0) || t - tStart > 3)) void finalize(Math.max(lastPt, lastImp?.tPerf ?? 0));
+        if (dt.shouldFinalize(t, lastImp?.tPerf)) void finalize(Math.max(dt.tLast, lastImp?.tPerf ?? 0));
       }
       schedule();
     };

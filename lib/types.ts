@@ -253,6 +253,27 @@ export interface BallRecord {
   flags: string[];
   clipId: string | null;
   synthetic: boolean;
+  /** how well the video supported this analysis (live and uploaded clips only; absent for the simulator) */
+  quality?: AnalysisQuality;
+}
+
+/** What the analysis saw, so the UI can say how far to trust each number. */
+export interface AnalysisQuality {
+  /** ball positions tracked before contact */
+  trackPoints: number;
+  /** RMS pixel error of the 3-D flight fit (lower is better) */
+  fitRmsPx: number;
+  /** where the contact time came from */
+  contact: "audio" | "manual" | "none";
+  /** frames in which a bowler / batter skeleton was found */
+  bowlerPoseFrames: number;
+  batterPoseFrames: number;
+  /** 1-sigma uncertainty of the speed (km/h) from the flight fit; absent when not computed */
+  speedSigmaKph?: number;
+  /** 0..1 overall trust in the flight numbers (speed, line, length, swing) */
+  confidence: number;
+  /** plain-language reasons for any reduction in confidence */
+  warnings: string[];
 }
 
 export interface SessionSummary {
