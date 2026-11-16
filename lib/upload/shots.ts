@@ -65,8 +65,8 @@ export class CutDetector {
 
 export interface Shot { start: number; end: number }
 /** Shots between cuts, dropping slivers shorter than `minS`. */
-export function shotsFromCuts(cuts: number[], duration: number, minS = 0.4): Shot[] {
-  const edges = [0, ...cuts.filter((c) => c > 0 && c < duration).sort((a, b) => a - b), duration];
+export function shotsFromCuts(cuts: number[], duration: number, minS = 0.4, start = 0): Shot[] {
+  const edges = [start, ...cuts.filter((c) => c > start && c < duration).sort((a, b) => a - b), duration];
   const out: Shot[] = [];
   for (let i = 0; i < edges.length - 1; i++) if (edges[i + 1] - edges[i] >= minS) out.push({ start: edges[i], end: edges[i + 1] });
   return out;

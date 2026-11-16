@@ -1,6 +1,6 @@
 import type { CameraModel, Pt } from "@/lib/types";
 import { pixelToGround, pitchCorridor, pointInPolygon } from "@/lib/physics/homography";
-import { liftToWorld, type Skeleton } from "./skeleton";
+import { liftBodyScaled, liftToWorld, mainSubject, type Skeleton } from "./skeleton";
 import { PITCH_LENGTH } from "@/lib/physics/constants";
 
 export interface PoseOptions {
@@ -9,6 +9,8 @@ export interface PoseOptions {
   wasmBase?: string;
   delegate?: "GPU" | "CPU";
   numPoses?: number;
+  /** batting-only footage with no pitch calibration: the biggest person is the batter, scaled by this standing height (m) */
+  bodyScale?: { statureM: number; imageWidth: number; imageHeight: number; subject?: { x: number; y: number } };
 }
 
 const DEFAULTS = {
@@ -23,8 +25,9 @@ export class PoseTracker {
   private lm: import("@mediapipe/tasks-vision").PoseLandmarker | null = null;
   private corridor: Pt[] = [];
   private lastTs = -1;
+  private subject: { x: number; y: number } | null = null;
 
-  constructor(private cam: CameraModel, private opts: PoseOptions = {}) { this.corridor = pitchCorridor(cam, 1.2, 4); }
+  constructor(private cam: CameraModel | null, private opts: PoseOptions = {}) { if (cam) this.corridor = pitchCorridor(cam, 1.2, 4); }
   setCamera(cam: CameraModel) { this.cam = cam; this.corridor = pitchCorridor(cam, 1.2, 4); }
 
   /** Prefer the self-hosted runtime and model (npm run vendor:models); fall back to the public CDN unless self-host-only. */
@@ -53,6 +56,14 @@ export class PoseTracker {
     const ms = Math.max(this.lastTs + 1, Math.round(tSec * 1000));   // MediaPipe requires strictly increasing timestamps
     this.lastTs = ms;
     const res = this.lm.detectForVideo(video as HTMLVideoElement, ms);
+    if (!this.cam) {
+      const bs = this.opts.bodyScale; if (!bs) return { bowler: null, batter: null, people: 0 };
+      // follow the batter the user tapped (re-anchored every frame); if they are lost, wait for them rather than switch person
+      const i = mainSubject(res.landmarks, bs.imageWidth, bs.imageHeight, this.subject ?? bs.subject ?? null);
+      if (i >= 0 && (this.subject || bs.subject)) { const L = res.landmarks[i]; this.subject = { x: (L[23].x + L[24].x) / 2, y: (L[23].y + L[24].y) / 2 }; }
+      const sk = i < 0 ? null : liftBodyScaled(res.landmarks[i], res.worldLandmarks[i], tSec, bs.imageWidth, bs.imageHeight, bs.statureM);
+      return { bowler: null, batter: sk, people: res.landmarks.length };
+    }
     const W = this.cam.imageWidth, H = this.cam.imageHeight;
     const cands: { sk: Skeleton; y: number }[] = [];
     for (let i = 0; i < res.landmarks.length; i++) {

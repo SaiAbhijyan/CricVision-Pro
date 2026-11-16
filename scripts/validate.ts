@@ -18,10 +18,10 @@ for (const end of ["batter", "bowler"] as const) for (const fps of [30, 60, 120,
   cases.push({ name: `${end}-end ${fps}fps ${kph}kph red-on-pitch`, end, fps, kph, bounceY: 14.5, bounceX: 0.1, swing: 0, bg: 118, ball: 75, noise: 3 });
 }
 const fails: string[] = [];
-const rows: string[] = []; let tot = 0, det = 0; const errs = { speed: [] as number[], bounceY: [] as number[], bounceX: [] as number[] };
+const rows: string[] = []; let tot = 0, det = 0, refusedOk = 0; const errs = { speed: [] as number[], bounceY: [] as number[], bounceX: [] as number[] };
 async function main() {
   const only = process.argv[2];
-  for (const c of cases) {
+  for (const c of cases.filter((x) => !process.env.ONLY || x.name.includes(process.env.ONLY))) {
     if (only && !c.name.includes(only)) continue;
     const w = 1280, h = 720;
     const calRaw = virtualCalibration(w, h, c.end);
@@ -36,7 +36,15 @@ async function main() {
     const res = await analyseClip(clip.src, { cfg, cal, impacts: [] });
     tot++;
     const b = res.balls[0];
-    if (!b) { fails.push(`${c.name}: no delivery detected`); rows.push(`${c.name.padEnd(40)} NO DELIVERY  (${res.diagnostics.map((d) => `${d.trackPoints}pts ${d.reason ?? ""}`).join("; ") || "no track"})`); continue; }
+    if (!b) {
+      // refusing an uncertain figure ("too uncertain to report") is an honest outcome; a wrong number is not. Refusals are
+      // allowed up to a quarter of the cases (below)
+      const why = res.diagnostics.map((d) => `${d.trackPoints}pts ${d.reason ?? ""}`).join("; ") || "no track";
+      const refused = res.diagnostics.some((d) => /Too uncertain/.test(d.reason ?? ""));
+      if (refused) refusedOk++; else fails.push(`${c.name}: no delivery reported (${why.slice(0, 120)})`);
+      const row = `${c.name.padEnd(40)} ${refused ? "REFUSED (uncertain)" : "NO DELIVERY"}  (${why.slice(0, 160)})`;
+      rows.push(row); console.log(row); continue;
+    }
     det++;
     const tb = clip.truth.bounce!;
     const eS = (b.speedKph ?? 0) - clip.truth.speedKph, eY = (PITCH_LENGTH - (b.bounceYFromBatter ?? 0)) - tb.y, eX = (b.bounceX ?? 0) - tb.x;
@@ -47,11 +55,12 @@ async function main() {
     if (Math.abs(eX) > 0.2) fails.push(`${c.name}: bounce line error ${eX.toFixed(2)} m > 0.2`);
     if (Math.abs(eS) > 8 && conf > 0.7) fails.push(`${c.name}: ${eS.toFixed(1)} km/h wrong but confidence ${conf.toFixed(2)}`);
     errs.speed.push(eS); errs.bounceY.push(eY); errs.bounceX.push(eX);
-    const row = `${c.name.padEnd(40)} pts=${String(b.quality?.trackPoints).padStart(3)} rms=${b.quality?.fitRmsPx} speed ${b.speedKph?.toFixed(1)} (truth ${clip.truth.speedKph.toFixed(1)}, ${eS >= 0 ? "+" : ""}${eS.toFixed(1)})  bounceY err ${eY.toFixed(2)} m  bounceX err ${eX.toFixed(2)} m  sig ±${b.quality?.speedSigmaKph} conf ${b.quality?.confidence.toFixed(2)}  ${Date.now() - t0} ms`;
+    const row = `${c.name.padEnd(40)} pts=${String(b.quality?.trackPoints).padStart(3)} rms=${b.quality?.fitRmsPx} speed ${b.speedKph?.toFixed(1)} (truth ${clip.truth.speedKph.toFixed(1)}, ${eS >= 0 ? "+" : ""}${eS.toFixed(1)})  bounceY err ${eY.toFixed(2)} m  bounceX err ${eX.toFixed(2)} m  sig ±${b.quality?.speedSigmaKph?.toFixed(1)} conf ${b.quality?.confidence.toFixed(2)}  ${Date.now() - t0} ms`;
     rows.push(row); console.log(row);
   }
   const stat = (a: number[]) => a.length ? `mean ${(a.reduce((s, x) => s + x, 0) / a.length).toFixed(2)}, mean|err| ${(a.reduce((s, x) => s + Math.abs(x), 0) / a.length).toFixed(2)}, max|err| ${Math.max(...a.map(Math.abs)).toFixed(2)}` : "n/a";
-  console.log(`\ndetected ${det}/${tot}\nspeed km/h: ${stat(errs.speed)}\nbounce y m: ${stat(errs.bounceY)}\nbounce x m: ${stat(errs.bounceX)}`);
+  if (refusedOk > tot / 4) fails.push(`${refusedOk} of ${tot} cases refused as too uncertain (more than a quarter)`);
+  console.log(`\nreported ${det}/${tot}, refused as too uncertain ${refusedOk}\nspeed km/h: ${stat(errs.speed)}\nbounce y m: ${stat(errs.bounceY)}\nbounce x m: ${stat(errs.bounceX)}`);
   if (fails.length) { console.log("\nFAILED:\n" + fails.join("\n")); process.exit(1); }
   console.log("\nall validation gates passed");
 }

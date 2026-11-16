@@ -1,3 +1,4 @@
+import { IDENTITY, applyZP, composeZP, invertZP, warpGray, type ZoomPan } from "./stabilise";
 import type { CameraModel, Pt } from "@/lib/types";
 import { expectedBallPx, pitchCorridor, pointInPolygon, pixelToGround } from "@/lib/physics/homography";
 import { BallKalman } from "./kalman";
@@ -77,22 +78,49 @@ export class BallDetector {
    * Symmetric three-frame difference: a pixel counts only if the middle frame differs from both its predecessor and its
    * successor, which removes the "ghost" a slow ball leaves where it sat in two earlier frames.
    */
-  detect(cur: Gray, base = 1): Candidate[] {
+  detect(cur: Gray, base = 1, toRef?: ZoomPan): Candidate[] {
     this.ensureMask(cur.w, cur.h);
     const { w, h } = cur;
     const out: Candidate[] = [];
+    this.ringM.push(toRef ?? IDENTITY); if (this.ringM.length > 2 * base + 1) this.ringM.splice(0, this.ringM.length - (2 * base + 1));
     // frame ring: the window is (prev, mid, next) = (cur - 2*base, cur - base, cur). A wider baseline keeps a slow-moving ball
     // from cancelling itself against its own earlier position (high frame-rate clips move the ball only a few px per frame).
     this.ring.push(cur); if (this.ring.length > 2 * base + 1) this.ring.splice(0, this.ring.length - (2 * base + 1));
     if (this.ring.length < 2 * base + 1 || this.ring[0].w !== w || this.ring[0].h !== h) return out;
-    const a = this.ring[base], b = this.ring[0];
+    // a zooming/panning camera: bring the two earlier frames into this frame's coordinates first, and look the pitch corridor up
+    // in the reference (calibration) frame, so the difference shows what moved in the scene rather than the camera.
+    let a = this.ring[base], b = this.ring[0], mask = this.mask!;
+    let nr = 1;
+    if (toRef) {
+      const back = invertZP(toRef);
+      const mv1 = composeZP(this.ringM[this.ringM.length - 2] ?? toRef, back);   // previous frame -> this frame
+      nr = Math.max(1, Math.min(3, Math.round(0.15 * (Math.abs(mv1.s - 1) * w * 0.5 + Math.hypot(mv1.tx, mv1.ty)))));
+      a = warpGray(a, composeZP(this.ringM[base], back), cur);
+      b = warpGray(b, composeZP(this.ringM[0], back), cur);
+      const ref = this.mask!, m2 = new Uint8Array(w * h);
+      // the bottom band holds the TV score bar, which stays put on screen while the scene moves under it: its edge would be
+      // dragged across the pitch by the warp, so it is left out (the same band the motion estimate ignores)
+      const yMax = Math.floor(h * 0.85);
+      for (let y = 0; y < yMax; y++) for (let x = 0; x < w; x++) { const r = applyZP(toRef, w, h, x, y), rx = Math.round(r.x), ry = Math.round(r.y); if (rx >= 0 && ry >= 0 && rx < w && ry < h && ref[ry * w + rx]) m2[y * w + x] = 1; }
+      mask = m2;
+    }
     const bin = new Uint8Array(w * h);
     const mv = new Uint8Array(w * h);     // min of the two frame differences: the ball must differ from BOTH previous frames
-    const mask = this.mask!;
     const hist = new Uint32Array(256); let nSamp = 0;
     for (let i = 0; i < w * h; i++) {
       if (!mask[i]) continue;
-      const d1 = Math.abs(a.data[i] - b.data[i]), d2 = Math.abs(a.data[i] - cur.data[i]);   // a = middle frame, b = previous, cur = next
+      let d1: number, d2: number;
+      if (toRef) {
+        // warped frames are registered to within about a pixel, and a fast pan smears edges by a few more: compare against the
+        // best match in a small neighbourhood (sized by this frame's camera motion) so crease lines and players do not light up,
+        // while the ball, which moves further than that between frames, still does
+        d1 = 255; d2 = 255; const av = a.data[i];
+        for (let dy = -nr * w; dy <= nr * w; dy += w) for (let dx = -nr; dx <= nr; dx++) {
+          const j = i + dy + dx; if (j < 0 || j >= w * h) continue;
+          const e1 = Math.abs(av - b.data[j]), e2 = Math.abs(av - cur.data[j]);
+          if (e1 < d1) d1 = e1; if (e2 < d2) d2 = e2;
+        }
+      } else { d1 = Math.abs(a.data[i] - b.data[i]); d2 = Math.abs(a.data[i] - cur.data[i]); }   // a = middle frame, b = previous, cur = next
       const m = d1 < d2 ? d1 : d2;
       mv[i] = m;
       if ((i & 3) === 0) { hist[m]++; nSamp++; }
@@ -127,24 +155,34 @@ export class BallDetector {
       const bw = maxx - minx + 1, bh = maxy - miny + 1;
       const aspect = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
       if (aspect > 4) continue; // a ball (even motion-smeared) is compact; limbs/bats are long
-      const cx = sx / sw + 0.5, cy = sy / sw + 0.5;   // pixel centres -> continuous image coordinates
+      let cx = sx / sw + 0.5, cy = sy / sw + 0.5;   // pixel centres -> continuous image coordinates
+      const lkC = area >= 6 ? lucasKanade(b, a, cx, cy, 4) : null;
+      let ar = area, sc = 1;
+      if (toRef) { const r = applyZP(toRef, w, h, cx, cy); cx = r.x; cy = r.y; sc = toRef.s; ar = area * sc * sc; }   // report in reference coordinates
       // size gate using the homography: estimate ground point under the blob, expected ball px at ~1m height
       const g = pixelToGround(this.cam, { x: cx / this.scale, y: cy / this.scale });
       const expPx = expectedBallPx(this.cam, g.x, Math.min(Math.max(g.y, 0), 20.12), 1.0) * this.scale;
-      const diam = Math.max(bw, bh);
+      const diam = Math.max(bw, bh) * sc;
       if (expPx > 0 && diam > expPx * 4 + 6) continue;
-      const lk = area >= 6 ? lucasKanade(b, a, cx, cy, 4) : null;
-      out.push({ x: cx, y: cy, area, flow: lk ? { vx: lk.dx, vy: lk.dy } : null });
+      out.push({ x: cx, y: cy, area: ar, flow: lkC ? { vx: lkC.dx * sc, vy: lkC.dy * sc } : null });
     }
-    return out;
+    // a ball is an isolated speck; a moving body throws up a cluster of candidates (limbs, shirt folds, bat). Drop candidates
+    // with several neighbours close by. Distances in this frame's pixels (before any mapping to the reference frame).
+    const R = Math.max(8, 0.0125 * w), sc0 = toRef ? toRef.s : 1;
+    const kept = out.filter((c, i) => { let nb = 0; for (let j = 0; j < out.length; j++) if (j !== i && Math.hypot(out[j].x - c.x, out[j].y - c.y) < R * sc0 && ++nb >= 4) return false; return true; });
+    this.lastCands = kept;
+    return kept;
   }
 
   /** noise multiplier for the auto threshold (th = autoK x 99th percentile of the min frame-difference) */
   autoK = 2.4;
 
   private ring: Gray[] = [];
+  private ringM: ZoomPan[] = [];
+  /** candidates from the last call (diagnostics) */
+  lastCands: Candidate[] = [];
 
-  reset() { this.ring = []; }
+  reset() { this.ring = []; this.ringM = []; }
 }
 
 export interface TrackPoint { t: number; x: number; y: number }
@@ -197,7 +235,7 @@ export class BallTracker {
       return this.points[0];
     }
     // 2. small balls give no usable flow: look for three detections (not necessarily consecutive frames) on one constant-velocity path
-    this.recent.push({ t, c: cands.slice().sort((p, q) => q.area - p.area).slice(0, 10) }); if (this.recent.length > 6) this.recent.shift();
+    this.recent.push({ t, c: cands.slice().sort((p, q) => q.area - p.area).slice(0, 20) }); if (this.recent.length > 6) this.recent.shift();
     const R = this.recent, n = R.length, vmax = this.maxPxPerFrame * frameW;
     if (n >= 3) {
       let best: { a: Candidate; b: Candidate; c: Candidate; ta: number; tb: number; tc: number; score: number } | null = null;

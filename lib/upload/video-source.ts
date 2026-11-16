@@ -1,11 +1,13 @@
 /** Browser-side ClipSource: decodes an uploaded video by stepping an HTMLVideoElement frame by frame. Nothing leaves the device. */
 import type { ClipFrame, ClipSource } from "./analyse";
+import type { CameraModel } from "@/lib/types";
 import type { PoseTracker } from "@/lib/cv/pose";
 import type { FrameRing } from "@/lib/cv/frame-ring";
 import type { PosePair } from "@/lib/cv/pose";
 import { ANALYSIS_WIDTH, chooseAnalysisWidth, effectiveFps, estimateFps, frameClipTime, frameSeekTime, rgbaToGray } from "./media";
 import { detectImpacts } from "./audio";
 import type { ImpactEvent } from "@/lib/audio/transient";
+import { CutDetector, shotsFromCuts, type Shot } from "./shots";
 
 export interface VideoSourceOptions {
   video: HTMLVideoElement;
@@ -49,7 +51,7 @@ export class VideoClipSource implements ClipSource {
     }
   }
 
-  async frame(k: number, opt: { pose: boolean }): Promise<ClipFrame> {
+  async frame(k: number, opt: { pose: boolean; poseCam?: CameraModel }): Promise<ClipFrame> {
     const v = this.o.video;
     await seekTo(v, frameSeekTime(k, this.o.mediaFps));
     const t = frameClipTime(k, this.o.mediaFps, this.o.timeScale);
@@ -62,6 +64,7 @@ export class VideoClipSource implements ClipSource {
       this.o.ring.push(t, await createImageBitmap(this.ringCanvas));
     }
     let pose: PosePair | undefined;
+    if (opt.poseCam && this.o.pose) this.o.pose.setCamera(opt.poseCam);
     if (opt.pose && this.o.pose) { try { pose = this.o.pose.detect(v, t); } catch { pose = undefined; } }
     return { t, gray, pose };
   }
@@ -99,3 +102,17 @@ export async function audioImpacts(file: File, timeScale: number, signal?: { abo
 }
 
 export { ANALYSIS_WIDTH };
+
+/** Quick pass over a video (5 samples a second, 160x90) to find its camera shots, for highlight reels and broadcast clips. Media time. */
+export async function scanShots(v: HTMLVideoElement, signal: { aborted: boolean }, onProgress?: (frac: number) => void, hz = 5): Promise<Shot[]> {
+  const W = 160, H = 90, c = new OffscreenCanvas(W, H), g = c.getContext("2d", { willReadFrequently: true })!;
+  const cd = new CutDetector(0.4), dur = v.duration;
+  for (let t = 0; t < dur && !signal.aborted; t += 1 / hz) {
+    v.currentTime = t;
+    await new Promise<void>((res) => { const done = () => { v.removeEventListener("seeked", done); res(); }; v.addEventListener("seeked", done); setTimeout(done, 3000); });
+    g.drawImage(v, 0, 0, W, H);
+    cd.push(t, { w: W, h: H, data: rgbaToGray(g.getImageData(0, 0, W, H).data, W, H) });
+    onProgress?.(t / dur);
+  }
+  return shotsFromCuts(cd.cuts, dur);
+}

@@ -6,7 +6,7 @@
  */
 import type { BallRecord, Handedness, SessionConfig } from "@/lib/types";
 import { extractBatting } from "@/lib/cv/biomech";
-import type { Skeleton } from "@/lib/cv/skeleton";
+import type { JointName, Skeleton } from "@/lib/cv/skeleton";
 
 const mid = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
 
@@ -32,13 +32,45 @@ export function detectSwings(frames: Skeleton[]): number[] {
   return out;
 }
 
-/** One BallRecord per swing, with the batting numbers and no ball fields. Swings the body tracker could not follow are skipped. */
-export function swingRecords(frames: Skeleton[], hand: Handedness, cfg: SessionConfig, startIndex: number, startedAt: number): { record: BallRecord; impactT: number }[] {
+/** Why a detected movement is not reported as a swing (null = it passes). Physical limits and tracking consistency: on real
+ *  broadcast footage the hands-speed peak also fires on walking, celebrations, other players and camera moves. */
+export function swingRejectReason(win: Skeleton[], t: number, b: { strideCm: number; headDriftCm: number; backliftDeg: number; downswingMs: number }): string | null {
+  const core = win.filter((f) => f.t >= t - 1.0 && f.t <= t + 0.3);
+  if (core.length < 20) return "the batter was not tracked for long enough around the swing";
+  for (let i = 1; i < core.length; i++) {
+    const a = core[i - 1].j, c = core[i].j, dt = Math.max(1e-3, core[i].t - core[i - 1].t);
+    const hip = Math.hypot((a.lHip.x + a.rHip.x - c.lHip.x - c.rHip.x) / 2, (a.lHip.y + a.rHip.y - c.lHip.y - c.rHip.y) / 2);
+    if (hip / dt > 9) return "the tracked body jumped (another person, or a camera cut)";
+  }
+  const hz = core.map((f) => f.j.nose.z).sort((x, y) => x - y), med = hz[hz.length >> 1];
+  if (hz[0] < med - 0.45 || hz[hz.length - 1] > med + 0.35) return "the body's size changed (zoom or a different person)";
+  // a batter is nearly still before the shot; a bowler running in or a fielder chasing is not
+  const pre = core.filter((f) => f.t <= t - 0.3), hipV: number[] = [];
+  for (let i = 1; i < pre.length; i++) { const a = pre[i - 1].j, c = pre[i].j; hipV.push(Math.hypot((a.lHip.x + a.rHip.x - c.lHip.x - c.rHip.x) / 2, (a.lHip.y + a.rHip.y - c.lHip.y - c.rHip.y) / 2) / Math.max(1e-3, pre[i].t - pre[i - 1].t)); }
+  hipV.sort((x, y) => x - y);
+  if (hipV.length >= 4 && hipV[hipV.length >> 1] > 2.2) return "the person was running, not batting";
+  if (b.strideCm > 160) return "the stride is longer than a batter can take";
+  if (Math.abs(b.headDriftCm) > 60) return "the head moved further than in any swing";
+  if (b.downswingMs < 100) return "no backlift was found before the fast movement";
+  return null;
+}
+
+/** One BallRecord per swing, with the batting numbers and no ball fields. Movements that fail the checks above are dropped
+ *  (their count and reasons go to `rejected`). */
+export function swingRecords(frames: Skeleton[], hand: Handedness, cfg: SessionConfig, startIndex: number, startedAt: number, rejected?: string[]): { record: BallRecord; impactT: number }[] {
   const out: { record: BallRecord; impactT: number }[] = [];
   for (const t of detectSwings(frames)) {
     const win = frames.filter((f) => f.t >= t - 2.5 && f.t <= t + 0.4);
     const bx = extractBatting(win, { hand, impactT: t });
     if (!bx || !bx.biomech.swingDetected) continue;
+    const why = swingRejectReason(win, t, bx.biomech);
+    if (why) { rejected?.push(why); continue; }
+    const warnings = ["Contact time was taken from the fastest part of the swing, so timing against the ball is not measured."];
+    // a downswing this long is a slow-motion replay (or no real swing): speeds and times from it would be wrong
+    if (bx.biomech.downswingMs > 700) {
+      bx.biomech.unmeasured = [...new Set([...(bx.biomech.unmeasured ?? []), "batSpeed" as const])];
+      warnings.push(`The downswing took ${Math.round(bx.biomech.downswingMs)} ms, which looks like slow motion: bat speed and timing are not measured. Set the slow-motion factor to measure them.`);
+    }
     const i = startIndex + out.length;
     out.push({ impactT: t, record: {
       id: `b${i + 1}`, index: i + 1, over: 0, ballInOver: 1, timeMs: startedAt,
@@ -46,7 +78,7 @@ export function swingRecords(frames: Skeleton[], hand: Handedness, cfg: SessionC
       bounceHeightCm: null, stumpArrival: null, bowling: null, batting: bx.biomech, timing: null, shot: null, ballistics: null,
       outcome: { runs: 0, extraRuns: 0, extra: null, legal: false, wicket: null, boundary: null, freeHitNext: false, notes: ["Swing analysed without a ball: no timing, shot or runs."] },
       flags: ["Swing only (no ball tracked)"], clipId: null, synthetic: false,
-      quality: { trackPoints: 0, fitRmsPx: 0, contact: "none", bowlerPoseFrames: 0, batterPoseFrames: win.length, confidence: win.length >= 20 ? 0.6 : 0.4, warnings: ["Contact time was taken from the fastest part of the swing, so timing against the ball is not measured."] },
+      quality: { trackPoints: 0, fitRmsPx: 0, contact: "none", bowlerPoseFrames: 0, batterPoseFrames: win.length, confidence: win.length >= 20 ? 0.6 : 0.4, warnings },
     } });
   }
   void cfg;
@@ -62,4 +94,36 @@ export function finishedSwings(frames: Skeleton[], hand: Handedness, cfg: Sessio
     if (r[0]) out.push({ ...r[0], impactT: t });
   }
   return out;
+}
+
+/**
+ * Turn camera-axis skeletons into the pitch frame without a calibration: a side-on batter's hip and shoulder lines point down
+ * the pitch in the stance, so the median of that direction becomes "toward the bowler" (-Y) and the batter is placed at the
+ * popping crease. Every swing number is then the same whatever angle the camera filmed from.
+ */
+export function alignToStance(frames: Skeleton[], hand: Handedness, creaseY: number, stanceBefore?: number): Skeleton[] {
+  if (!frames.length) return frames;
+  // In a side-on stance the hip and shoulder lines point at the bowler (the feet are often a little open), so use those, from
+  // frames before the backlift when there are any.
+  const L = hand === "RHB", st = stanceBefore !== undefined ? frames.filter((f) => f.t <= stanceBefore) : [];
+  const use = st.length >= 3 ? st : frames;
+  const angs: number[] = [];
+  const pairs: [JointName, JointName][] = L ? [["lHip", "rHip"], ["lSh", "rSh"]] : [["rHip", "lHip"], ["rSh", "lSh"]];
+  for (const f of use) for (const [a, b] of pairs) angs.push(Math.atan2(f.j[a].y - f.j[b].y, f.j[a].x - f.j[b].x));
+  angs.sort((a, b) => a - b);
+  // circular median: pick the angle with the smallest summed distance to the rest
+  let ang = angs[Math.floor(angs.length / 2)], bestCost = Infinity;
+  for (const a of angs.filter((_, i) => i % Math.max(1, Math.floor(angs.length / 40)) === 0)) {
+    let c = 0; for (const b of angs) { const d = Math.atan2(Math.sin(b - a), Math.cos(b - a)); c += Math.abs(d); }
+    if (c < bestCost) { bestCost = c; ang = a; }
+  }
+  const rot = -Math.PI / 2 - ang, cs = Math.cos(rot), sn = Math.sin(rot);
+  const h0 = frames.map((f) => ({ x: (f.j.lHip.x + f.j.rHip.x) / 2, y: (f.j.lHip.y + f.j.rHip.y) / 2 }));
+  const cx = h0.reduce((a, p) => a + p.x, 0) / h0.length, cy = h0.reduce((a, p) => a + p.y, 0) / h0.length;
+  const pcx = cx * cs - cy * sn, pcy = cx * sn + cy * cs;
+  return frames.map((f) => {
+    const j = {} as Skeleton["j"];
+    for (const k of Object.keys(f.j) as (keyof Skeleton["j"])[]) { const p = f.j[k]; j[k] = { x: p.x * cs - p.y * sn - pcx, y: p.x * sn + p.y * cs - pcy + creaseY + 0.15, z: p.z }; }
+    return { t: f.t, j };
+  });
 }

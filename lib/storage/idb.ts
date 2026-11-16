@@ -2,7 +2,7 @@ import type { Calibration, ClipMeta, CoachReport, FieldPlayer, SessionSummary } 
 
 export interface StoredSession extends SessionSummary {
   mode: "sim" | "live" | "upload";
-  calibration: Calibration;
+  calibration?: Calibration;
   field: FieldPlayer[];
   report?: CoachReport;
 }

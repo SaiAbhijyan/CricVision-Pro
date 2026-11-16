@@ -1,5 +1,5 @@
-import { weightOk, batSpeedOk } from "@/lib/cv/biomech";
 "use client";
+import { weightOk, batSpeedOk } from "@/lib/cv/biomech";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import type { BallRecord } from "@/lib/types";
 import { Box } from "./Charts";

@@ -19,6 +19,11 @@ export interface FitResult {
   turnRpm: number;
   /** 1-sigma uncertainty of speed (km/h) from the residual rise when speed is pinned away from the best fit; large = speed not well determined by this track */
   speedSigmaKph: number;
+  /** jackknife spread of speed (km/h): the track refitted with each quarter of it left out, each refit starting from this
+   *  solution. Catches stretches of systematically wrong points that the residual-based sigma cannot see. */
+  jackSigmaKph?: number;
+  /** final value of the (truncated) cost; internal, for comparing refits */
+  fx?: number;
 }
 
 /**
@@ -43,10 +48,24 @@ export function fitFlightTo2D(cam: CameraModel, obs: TrackObs[], surface: PitchS
     if (!refit) break;
     fit = refit;
   }
+  if (fit && obs.length >= 12) {
+    const ord = obs.map((_, i) => i).sort((a, b) => obs[a].t - obs[b].t), vs: number[] = [], B = 4;
+    const x0 = [fit.release.x, fit.release.y, fit.release.z, fit.velocity.x, fit.velocity.y, fit.velocity.z, fit.swingAccel, fit.turnRpm];
+    for (let q = 0; q < B; q++) {
+      const drop = new Set(ord.slice(Math.floor((q * ord.length) / B), Math.floor(((q + 1) * ord.length) / B)));
+      const mask = obs.map((_, i) => !drop.has(i) && (!use || use[i]));
+      // the subset's best solution: a local refit from the full answer, or a fresh search if that finds a better fit
+      const fl = fitOnce(cam, obs, surface, mask, x0), fg = fitOnce(cam, obs, surface, mask, undefined, true);
+      const f2 = fl && fg ? ((fg.fx ?? Infinity) < (fl.fx ?? Infinity) - 1e-6 ? fg : fl) : fl ?? fg;
+      if (f2) vs.push(f2.speedMs * 3.6);
+    }
+    if (vs.length >= 3) { const m = vs.reduce((a, b) => a + b, 0) / vs.length; fit.jackSigmaKph = +Math.sqrt(((vs.length - 1) / vs.length) * vs.reduce((a, b) => a + (b - m) ** 2, 0)).toFixed(1); }
+  }
   return fit;
 }
 
-function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?: boolean[]): FitResult | null {
+/** `init`: refine locally from this parameter vector instead of searching (used by the jackknife); returns speed only. */
+function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?: boolean[], init?: number[], quick = false): FitResult | null {
   if (obs.length < 5) return null;
   const first = obs[0], last = obs[obs.length - 1];
   const dur = Math.max(1e-3, last.t - first.t);
@@ -85,6 +104,12 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
     return e / Math.max(1, cnt) + 4 * pace + 0.4 * (x[6] / 3) ** 2 + 0.4 * (x[7] / 1500) ** 2;
   };
   const costQ = mkCost(Infinity), cost = mkCost(25);   // 5 px truncation
+  if (init) {
+    let r = nelderMead(cost, init, [0.05, 0.1, 0.05, 0.15, 0.4, 0.15, 0.5, 200], { maxIter: 500, tol: 1e-9 });
+    r = nelderMead(cost, r.x, [0.02, 0.04, 0.02, 0.06, 0.15, 0.06, 0.2, 80], { maxIter: 300, tol: 1e-10 });
+    const q = r.x;
+    return { release: { x: q[0], y: q[1], z: q[2] }, velocity: { x: q[3], y: q[4], z: q[5] }, speedMs: Math.hypot(q[3], q[4], q[5]), rmsPx: Math.sqrt(r.fx), samples: [], swingAccel: q[6], turnRpm: q[7], speedSigmaKph: 0, fx: r.fx };
+  }
   // Multi-start: a single guess is not enough for a one-camera fit because the height of the first/last observation is
   // unknown. Back-project both ends at several plausible heights, take gravity into account, and refine the best few.
   // The flight is a boundary-value problem: back-project the first and last observation at heights (zA, zB), then the
@@ -116,6 +141,7 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
   }
   if (!best) return null;
   const x = best.x;
+  if (quick) return { release: { x: x[0], y: x[1], z: x[2] }, velocity: { x: x[3], y: x[4], z: x[5] }, speedMs: Math.hypot(x[3], x[4], x[5]), rmsPx: Math.sqrt(best.fx), samples: [], swingAccel: x[6], turnRpm: x[7], speedSigmaKph: 0, fx: best.fx };
   // Profile likelihood on speed: pin speed 8% above and below the optimum, re-optimise everything else, and see how much the
   // pixel residual grows. A flight that fits equally well at 88% and 108% of its speed has no real speed measurement.
   const sp0 = Math.hypot(x[3], x[4], x[5]);

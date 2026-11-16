@@ -1,3 +1,4 @@
+import { applyZP, type ZoomPan } from "@/lib/cv/stabilise";
 import { project } from "@/lib/physics/homography";
 import { comOverlay } from "@/lib/cv/com";
 import type { Handedness } from "@/lib/types";
@@ -16,6 +17,8 @@ const nearestSk = (fr: Skeleton[], t: number, tol = 0.06): Skeleton | null => {
 export async function buildLiveClip(o: {
   id: string; sessionId: string; ballIndex: number; reason: string; cam: CameraModel; ring: FrameRing<ImageBitmap>;
   t0: number; t1: number; bowler: Skeleton[]; batter: Skeleton[]; track: TrackPt[]; hand?: Handedness;
+  /** zooming broadcast camera: maps calibration-frame pixels into the pixels of the frame at time t */
+  refToFrame?: (t: number) => ZoomPan;
 }): Promise<{ meta: ClipMeta; frames: Blob[] } | null> {
   const fr = o.ring.range(o.t0, o.t1);
   if (fr.length < 4) return null;
@@ -23,6 +26,8 @@ export async function buildLiveClip(o: {
   const frames: Blob[] = [], overlays: ClipOverlayFrame[] = [], tracer: { x: number; y: number }[] = [];
   const oc = new OffscreenCanvas(W, H), g = oc.getContext("2d")!;
   for (const f of fr) {
+    const zp = o.refToFrame?.(f.t);
+    const M = (p: { x: number; y: number }) => (zp ? applyZP(zp, o.cam.imageWidth, o.cam.imageHeight, p.x, p.y) : p);
     g.drawImage(f.item, 0, 0);
     frames.push(await oc.convertToBlob({ type: "image/jpeg", quality: 0.7 }));
     const lm: { x: number; y: number }[] = [];
@@ -30,13 +35,13 @@ export async function buildLiveClip(o: {
       const s = nearestSk(arr, f.t);
       if (!s) { for (let n = 0; n < JOINTS.length; n++) lm.push({ x: -1, y: -1 }); continue; }
       const pr = projectSkeleton(o.cam, s);
-      for (const j of JOINTS) lm.push(pr[j] ? { x: pr[j]!.x * k, y: pr[j]!.y * k } : { x: -1, y: -1 });
+      for (const j of JOINTS) lm.push(pr[j] ? { x: M(pr[j]!).x * k, y: M(pr[j]!).y * k } : { x: -1, y: -1 });
     }
     let b: { x: number; y: number } | null = null, bd = 0.05;
-    for (const p of o.track) { const d = Math.abs(p.t - f.t); if (d < bd) { bd = d; b = { x: p.x * k, y: p.y * k }; } }
+    for (const p of o.track) { const d = Math.abs(p.t - f.t); if (d < bd) { bd = d; const q = M(p); b = { x: q.x * k, y: q.y * k }; } }
     if (b) tracer.push(b);
     const bs = nearestSk(o.batter, f.t), bprev = nearestSk(o.batter, f.t - 1 / 30);
-    const com = bs ? comOverlay((p) => project(o.cam, p), bs, bprev && bprev !== bs ? bprev : undefined, o.hand ?? "RHB", k) : null;
+    const com = bs ? comOverlay((p) => { const q = project(o.cam, p); return q ? M(q) : null; }, bs, bprev && bprev !== bs ? bprev : undefined, o.hand ?? "RHB", k) : null;
     overlays.push({ t: f.t - fr[0].t, landmarks: lm, ball: b, com });
   }
   const dt = (fr[fr.length - 1].t - fr[0].t) / (fr.length - 1);

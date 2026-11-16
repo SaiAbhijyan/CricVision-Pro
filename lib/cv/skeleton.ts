@@ -156,3 +156,37 @@ export function smoothSkeletons(frames: Skeleton[], halfWinS = 0.05): Skeleton[]
     return { t: f.t, j };
   });
 }
+
+type LM = { x: number; y: number; visibility?: number };
+
+/** Pixel height of a detected person, nose to the lower ankle (used to pick the main subject and to set the scale). */
+export function personPixelHeight(lmk: LM[], W: number, H: number) {
+  const ank = Math.max(lmk[27].y, lmk[28].y) * H, nose = lmk[0].y * H;
+  const dx = ((lmk[27].x + lmk[28].x) / 2 - lmk[0].x) * W;
+  return Math.hypot(dx, ank - nose);
+}
+
+/**
+ * Camera-agnostic lift for batting-only footage (no pitch calibration): scale from the person's own height (nose to ankle is
+ * about 0.87 of standing height), body shape from MediaPipe's metric world landmarks. The axes are the camera's (x right,
+ * y away, z up); `alignToStance` later turns them so the batter faces the bowler.
+ */
+export function liftBodyScaled(lmk: LM[], wld: Vec3[], t: number, W: number, H: number, statureM: number): Skeleton | null {
+  if (lmk.length < 33 || wld.length < 33) return null;
+  const px = personPixelHeight(lmk, W, H);
+  if (px < 40) return null;
+  return liftWeakPerspective(lmk, wld, t, { metresPerPx: (0.87 * statureM) / px, refPx: W / 2, imageWidth: W, pitchDeg: 0, hipY: 0 });
+}
+
+/** The person to analyse: the one nearest `near` (normalised image point, e.g. where the user tapped the batter, then the
+ *  last position followed) when given, else the biggest person in the frame. -1 when nobody fits. */
+export function mainSubject(people: LM[][], W: number, H: number, near?: { x: number; y: number } | null): number {
+  if (near) {
+    let bi = -1, bd = 0.15;   // at most 15% of the frame from where the batter was
+    people.forEach((p, i) => { if (p.length >= 33) { const d = Math.hypot((p[23].x + p[24].x) / 2 - near.x, ((p[23].y + p[24].y) / 2 - near.y) * (H / W)); if (d < bd) { bd = d; bi = i; } } });
+    return bi;
+  }
+  let best = -1, bh = 0;
+  people.forEach((p, i) => { if (p.length >= 33) { const h = personPixelHeight(p, W, H); if (h > bh) { bh = h; best = i; } } });
+  return best;
+}

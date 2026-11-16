@@ -10,8 +10,11 @@ import { analyseClip, flightConfidence, type ClipSource } from "../lib/upload/an
 import { mp4Fps } from "../lib/upload/mp4";
 import { readFileSync, existsSync } from "fs";
 import { generateBatter, defaultBatter } from "../lib/sim/synth-pose";
+import { CutDetector, shotsFromCuts } from "../lib/upload/shots";
+import { applyZP, composeZP, estimateZoomPan, invertZP, warpGray } from "../lib/cv/stabilise";
+import { mapCalibration } from "../lib/upload/analyse";
 import { liftWeakPerspective } from "../lib/cv/skeleton";
-import { detectSwings, finishedSwings } from "../lib/upload/swing";
+import { alignToStance, detectSwings, finishedSwings } from "../lib/upload/swing";
 import { sanitizeBall } from "../lib/security/sanitize";
 import { renderClip, rng, gauss } from "./lib/synth-clip";
 import type { SessionConfig, Pt } from "../lib/types";
@@ -158,7 +161,7 @@ async function main() {
   /* ---- pipeline on rendered footage ---- */
   const w = 1280, h = 720;
   const mkCal = (end: "batter" | "bowler") => orientCalibration(screenOrder(virtualCalibration(w, h, end)), end);
-  const rc = (o: Partial<Parameters<typeof renderClip>[0]> & { kph?: number; end?: "batter" | "bowler" } = {}) => renderClip({ cam: buildCameraModel(virtualCalibration(w, h, o.end ?? "batter"))!, spec: spec(o.kph ?? 125), fps: 60, bg: 118, ball: 75, noise: 3, width: 960, ...o } as never);
+  const rc = (o: Partial<Parameters<typeof renderClip>[0]> & { kph?: number; end?: "batter" | "bowler" } = {}) => renderClip({ cam: buildCameraModel(virtualCalibration(w, h, o.end ?? "batter"))!, spec: spec(o.kph ?? 125), fps: 120, bg: 118, ball: 75, noise: 3, width: 960, ...o } as never);
 
   { const clip = rc();
     const r = await analyseClip(clip.src, { cfg, cal: mkCal("batter"), impacts: [] });
@@ -209,7 +212,7 @@ async function main() {
     if (r.balls[0]) ok(Math.abs((r.balls[0].speedKph ?? 0) - 125) > 40, "a wrong time scale is not silently absorbed"); }
 
   { // frame-rate conversion duplicates frames: the result must match the clean clip
-    const clip = rc({ kph: 125, fps: 60 });
+    const clip = rc({ kph: 125, fps: 120 });
     let last: Awaited<ReturnType<ClipSource["frame"]>> | null = null;
     const dup: ClipSource = { ...clip.src, frame: async (k, o) => { const f = await clip.src.frame(k, o); if (k % 3 === 2 && last) return { ...f, gray: last.gray }; last = f; return f; } };
     const r = await analyseClip(dup, { cfg, cal: mkCal("batter"), impacts: [] });
@@ -282,6 +285,96 @@ async function main() {
     ok(fb.biomech.unmeasured?.includes("batSpeed") === true, `an impossible bat speed is marked unmeasured (raw ${fb.biomech.batSpeedKph})`);
     const sb = sanitizeBall({ ...(await analyseClip(rc().src, { cfg, cal: mkCal("batter"), impacts: [] })).balls[0], batting: { ...nb.biomech, unmeasured: ["weight", "evil"] } });
     ok(JSON.stringify(sb?.batting?.unmeasured) === '["weight"]', "sanitizer keeps only known unmeasured tags"); }
+
+  { // camera cuts
+    const W = 160, H = 90, r = rng(3);
+    const scene = (seed: number, shift = 0) => { const q = rng(seed); const base = Array.from({ length: 12 }, () => ({ x: q() * W, y: q() * H, rr: 8 + q() * 25, v: 40 + q() * 200 })); const bg = 60 + q() * 120;
+      return () => { const d = new Uint8ClampedArray(W * H); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let v = bg; for (const b of base) if ((x - b.x - shift) ** 2 + (y - b.y) ** 2 < b.rr ** 2) v = b.v; d[y * W + x] = Math.max(0, Math.min(255, v + (r() - 0.5) * 8)); } return { w: W, h: H, data: d }; }; };
+    const A = scene(1), B = scene(2);
+    let cd = new CutDetector(); for (let k = 0; k < 60; k++) cd.push(k / 30, k < 30 ? A() : B());
+    ok(cd.cuts.length === 1 && Math.abs(cd.cuts[0] - 1) < 0.05, `hard cut found at 1.00 s (${cd.cuts.map((c) => c.toFixed(2))})`);
+    cd = new CutDetector(); for (let k = 0; k < 90; k++) cd.push(k / 30, A());
+    ok(cd.cuts.length === 0, "static noisy scene: no cuts");
+    cd = new CutDetector(); for (let k = 0; k < 90; k++) cd.push(k / 30, scene(1, k * 0.8)());
+    ok(cd.cuts.length === 0, `slow pan: no cuts (${cd.cuts.length})`);
+    cd = new CutDetector(); const a0 = A(), b0 = B();
+    for (let k = 0; k < 90; k++) { const m = Math.max(0, Math.min(1, (k - 40) / 9)); const a = A(), b = B(); const d = new Uint8ClampedArray(W * H); for (let i = 0; i < d.length; i++) d[i] = a.data[i] * (1 - m) + b.data[i] * m; cd.push(k / 30, { w: W, h: H, data: d }); }
+    void a0; void b0;
+    ok(cd.cuts.length === 1 && cd.cuts[0] > 1.15 && cd.cuts[0] < 1.75, `9-frame dissolve found as one cut (${cd.cuts.map((c) => c.toFixed(2))})`);
+    ok(JSON.stringify(shotsFromCuts([1, 1.1, 3], 5, 0.4, 0)) === JSON.stringify([{ start: 0, end: 1 }, { start: 1.1, end: 3 }, { start: 3, end: 5 }]), "shots from cuts drop slivers");
+
+    // a delivery that is cut away from mid-flight is not reported, and the user is told why
+    const clip = rc({ kph: 125 }); const half = Math.floor(clip.src.frameCount * 0.45);
+    const other = rc({ kph: 125, bg: 200 } as never);
+    const cutClip: ClipSource = { ...clip.src, frame: async (k, o) => { if (k < half) return clip.src.frame(k, o); const f = await other.src.frame(0, o); const g = f.gray; const d = new Uint8ClampedArray(g.data.length); for (let i = 0; i < d.length; i++) d[i] = 255 - g.data[(i * 7) % d.length]; return { ...f, t: k / clip.src.fps, gray: { ...g, data: d } }; } };
+    const rc1 = await analyseClip(cutClip, { cfg, cal: mkCal("batter"), impacts: [] });
+    ok(rc1.balls.length === 0 && rc1.shots.length === 2 && rc1.warnings.some((x) => /camera shots/.test(x)), `cut mid-delivery: no ball, two shots, user told (balls ${rc1.balls.length}, shots ${rc1.shots.length})`);
+
+    // range: analyse only the second delivery of a two-delivery file
+    const a = rc({ kph: 110 }), b = rc({ kph: 140 }); const durA = a.src.frameCount / a.src.fps;
+    const rr = await analyseClip(concat(a.src, b.src, 0), { cfg, cal: mkCal("batter"), impacts: [], range: { start: durA, end: durA + b.src.frameCount / b.src.fps } });
+    ok(rr.balls.length === 1 && Math.abs((rr.balls[0]?.speedKph ?? 0) - 140) < 8, `range limits analysis to one delivery (${rr.balls.map((x) => x.speedKph)})`);
+    const rn = await analyseClip(concat(a.src, b.src, 0), { cfg, cal: mkCal("batter"), impacts: [] });
+    ok(rn.shots.length === 1, "identical camera across deliveries: no false cut"); }
+
+  { // batting-only mode: no calibration, any camera angle
+    const { extractBatting } = await import("../lib/cv/biomech");
+    const { BATTER_CREASE_Y } = await import("../lib/physics/constants");
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const ref = extractBatting(sk, { hand: "RHB", impactT: 0.55 })!.biomech;
+    for (const yaw of [0, 90, 180, 270, 37]) {
+      const a = (yaw * Math.PI) / 180, c = Math.cos(a), s2 = Math.sin(a);
+      const cam = sk.map((f) => { const j = {} as typeof f.j; for (const k of Object.keys(f.j) as (keyof typeof f.j)[]) { const p = f.j[k]; j[k] = { x: p.x * c - p.y * s2 + 3, y: p.x * s2 + p.y * c - 7, z: p.z }; } return { t: f.t, j }; });
+      const al = alignToStance(cam, "RHB", BATTER_CREASE_Y, detectSwings(cam)[0] - 0.6);
+      const b = extractBatting(al, { hand: "RHB", impactT: 0.55 })!.biomech;
+      ok(Math.abs(b.frontFootPct - ref.frontFootPct) < 3 && Math.abs(b.batSpeedKph - ref.batSpeedKph) < 2 && Math.abs(b.strideCm - ref.strideCm) < 3 && Math.abs(b.swingPathDeg - ref.swingPathDeg) < 4,
+        `camera yaw ${yaw}°: same swing numbers (front ${b.frontFootPct.toFixed(0)} vs ${ref.frontFootPct.toFixed(0)}, bat ${b.batSpeedKph.toFixed(0)} vs ${ref.batSpeedKph.toFixed(0)}, path ${b.swingPathDeg.toFixed(0)} vs ${ref.swingPathDeg.toFixed(0)})`);
+    }
+    const blank = { w: 64, h: 36, data: new Uint8ClampedArray(64 * 36).fill(100) };
+    const src: ClipSource = { analysisWidth: 64, width: 1280, height: 720, fps: 30, frameCount: sk.length, frame: async (k) => ({ t: sk[k].t, gray: blank, pose: { bowler: null, batter: sk[k], people: 1 } }) };
+    const r = await analyseClip(src, { cfg, cal: null, impacts: [] });
+    ok(r.balls.length === 1 && !!r.balls[0].batting && r.model === null && r.balls[0].speedKph === null, "batting-only analysis: one swing, no ball, no calibration");
+    ok(r.balls[0]?.quality?.warnings.some((x) => /Batting-only mode/.test(x)) === true, "batting-only results say how they were scaled");
+    const none = await analyseClip({ ...src, frame: async (k) => ({ t: sk[k].t, gray: blank, pose: { bowler: null, batter: null, people: 0 } }) }, { cfg, cal: null, impacts: [] });
+    ok(none.balls.length === 0 && none.warnings.some((x) => /No batter was found/.test(x)), "batting-only with nobody in frame says so");
+    // a cut between two swings: each shot analysed on its own, never stitched across
+    const two = [...sk, ...sk.map((f) => ({ ...f, t: f.t + 3 }))];
+    let n = 0; const cutSrc: ClipSource = { ...src, frameCount: two.length, frame: async (k) => { n++; const g = k < sk.length ? blank : { w: 64, h: 36, data: new Uint8ClampedArray(64 * 36).map((_, i) => (i % 64 < 32 ? 230 : 10)) }; return { t: two[k].t, gray: g, pose: { bowler: null, batter: two[k], people: 1 } }; } };
+    const rc2 = await analyseClip(cutSrc, { cfg, cal: null, impacts: [] });
+    ok(rc2.shots.length === 2 && rc2.balls.length === 2, `two shots, one swing each (shots ${rc2.shots.length}, swings ${rc2.balls.length})`); void n;
+    const { liftBodyScaled, mainSubject } = await import("../lib/cv/skeleton");
+    const lm = Array.from({ length: 33 }, (_, i) => ({ x: 0.5, y: i === 0 ? 0.2 : i === 27 || i === 28 ? 0.8 : 0.5 }));
+    const wl = Array.from({ length: 33 }, (_, i) => ({ x: 0, y: i === 0 ? -0.7 : i === 27 || i === 28 ? 0.85 : 0, z: 0 }));
+    const lb = liftBodyScaled(lm, wl, 0, 1280, 720, 1.8)!;
+    ok(!!lb && lb.j.nose.z > 1.3 && lb.j.nose.z < 1.8, `body-scaled lift: head at a person's height (${lb?.j.nose.z.toFixed(2)} m)`);
+    ok(mainSubject([lm.map((p) => ({ ...p, y: 0.4 + (p.y - 0.5) * 0.3 })), lm], 1280, 720) === 1, "main subject is the biggest person"); }
+
+  { // zooming / panning TV camera: motion measured and removed
+    const W = 320, H = 180, q = rng(9);
+    const blobs = Array.from({ length: 60 }, () => ({ x: q() * W, y: q() * H, r: 4 + q() * 14, v: (q() - 0.5) * 90 }));
+    const tex = { w: W, h: H, data: new Uint8ClampedArray(W * H).map((_, i) => { const x = i % W, y = (i / W) | 0; let v = 120; for (const b of blobs) if ((x - b.x) ** 2 + (y - b.y) ** 2 < b.r ** 2) v += b.v; return v; }) };
+    for (const m of [{ s: 1.03, tx: 2.5, ty: -1.5 }, { s: 0.97, tx: -4, ty: 3 }, { s: 1, tx: 1.25, ty: 0 }]) {
+      const e = estimateZoomPan(tex, warpGray(tex, m, tex));
+      ok(Math.abs(e.s - m.s) < 0.003 && Math.abs(e.tx - m.tx) < 0.35 && Math.abs(e.ty - m.ty) < 0.35, `zoom/pan recovered: ${JSON.stringify(m)} -> s ${e.s.toFixed(4)} t ${e.tx.toFixed(2)},${e.ty.toFixed(2)}`);
+    }
+    const A = { s: 1.2, tx: 3, ty: -2 }, B = { s: 0.9, tx: -1, ty: 4 }, p = applyZP(composeZP(A, B), W, H, 50, 60), p2 = applyZP(B, W, H, applyZP(A, W, H, 50, 60).x, applyZP(A, W, H, 50, 60).y);
+    ok(Math.abs(p.x - p2.x) < 1e-9 && Math.abs(p.y - p2.y) < 1e-9, "zoom/pan composition is 'first then second'");
+    const back = applyZP(invertZP(A), W, H, applyZP(A, W, H, 50, 60).x, applyZP(A, W, H, 50, 60).y);
+    ok(Math.abs(back.x - 50) < 1e-9 && Math.abs(back.y - 60) < 1e-9, "zoom/pan inverse undoes it");
+
+    // a delivery filmed while the camera zooms 1.0 -> 1.5x and pans
+    const clip = rc({ kph: 125 }); const n = clip.src.frameCount, aw = clip.src.analysisWidth, ah = Math.round(aw * clip.src.height / clip.src.width);
+    const tq = rng(4), tblobs = Array.from({ length: 160 }, () => ({ x: tq() * aw, y: tq() * ah, r: 6 + tq() * 22, v: (tq() - 0.5) * 30 }));
+    const ttex = new Float32Array(aw * ah); for (let i = 0; i < ttex.length; i++) { const x = i % aw, y = (i / aw) | 0; for (const b of tblobs) if ((x - b.x) ** 2 + (y - b.y) ** 2 < b.r ** 2) ttex[i] += b.v; }
+    const Z = (k: number) => ({ s: 1 + 0.5 * k / n, tx: 24 * k / n, ty: -10 * k / n });
+    const zoomed: ClipSource = { ...clip.src, frame: async (k, o) => { const f = await clip.src.frame(k, o); const d = new Uint8ClampedArray(f.gray.data.length); for (let i = 0; i < d.length; i++) d[i] = f.gray.data[i] + ttex[i]; return { ...f, gray: warpGray({ ...f.gray, data: d }, Z(k)) }; } };
+    const calK = Math.round(n * 0.4), sc = aw / clip.src.width, zc = Z(calK);
+    const calZ = mapCalibration(mkCal("batter"), { s: zc.s, tx: zc.tx / sc, ty: zc.ty / sc });
+    const rz = await analyseClip(zoomed, { cfg, cal: calZ, impacts: [], cameraMotion: "compensate", calT: calK / clip.src.fps });
+    ok(rz.balls.length === 1 && Math.abs((rz.balls[0]?.speedKph ?? 0) - 125) < 8, `zooming camera, compensated: delivery found at the right speed (${rz.balls.map((b) => b.speedKph?.toFixed(1))}, ${JSON.stringify(rz.diagnostics.map((d) => d.reason ?? "ok"))})`);
+    ok(rz.warnings.some((w2) => /zoomed 1\.[45]x/.test(w2)), `zoom reported to the user (${rz.warnings[0]?.slice(0, 60)})`);
+    const rf = await analyseClip(zoomed, { cfg, cal: calZ, impacts: [] });
+    ok(rf.balls.every((b) => Math.abs((b.speedKph ?? 0) - 125) < 8 || (b.quality?.confidence ?? 0) <= 0.35), `zooming camera, NOT compensated: no confident wrong speed (${rf.balls.map((b) => `${b.speedKph?.toFixed(0)}@${b.quality?.confidence}`)})`); }
 
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

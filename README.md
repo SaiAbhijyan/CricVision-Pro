@@ -496,7 +496,7 @@ Without a key the coach runs in offline mode.
 * **Model names.** `gemini-4-hydrogen` and `gemini-4-carbon` follow the project specification; change them in `.env.local` if your account uses different IDs.
 * **Network assets.** The MediaPipe WASM and pose model load from a CDN by default; run `npm run vendor:models` and set `NEXT_PUBLIC_SELF_HOST_ONLY=1` to self-host.
 * **Swing and spin from one camera** are approximate (see 4.14). Bat speed is an estimate.
-* **Uploaded clips** (`/analyse`) need a fixed camera and are estimates, not radar-validated (see `docs/VALIDATION.md`).
+* **Uploaded clips** (`/analyse`) are estimates, not radar-validated (see `docs/VALIDATION.md`). Highlight reels are split at camera cuts (**Find camera shots**); TV footage that zooms or pans is compensated within the calibrated shot; **Batting only** mode measures swings from any angle without pitch marks (tap the batter in wide shots). Figures the footage cannot support are refused or marked "not measured", never guessed.
 * **Security trade-offs** (in-memory rate limit per instance) are listed in SECURITY.md; scripts use a per-request CSP nonce.
 * **Audio.** Input latency differs per device; tune `audioOffsetMs`. The analyser fallback is about 12 ms precise.
 
