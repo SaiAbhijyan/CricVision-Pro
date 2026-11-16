@@ -73,7 +73,7 @@ function batting(x: unknown): BattingBiomech | null {
   if (!isObj(x)) return null;
   const n = (k: string, lo: number, hi: number) => numD(x[k], lo, hi);
   return {
-    frontFootPct: n("frontFootPct", 0, 100), strideCm: n("strideCm", 0, 300), triggerMs: n("triggerMs", 0, 3000), headDriftCm: n("headDriftCm", -100, 100),
+    frontFootPct: n("frontFootPct", 0, 100), strideCm: n("strideCm", 0, 300), triggerMs: n("triggerMs", 0, 3000), headDriftCm: n("headDriftCm", -100, 100), ...(typeof x.headOverFrontFootCm === "number" ? { headOverFrontFootCm: n("headOverFrontFootCm", -150, 150) } : {}),
     backliftDeg: n("backliftDeg", 0, 180), frontElbowDeg: n("frontElbowDeg", -90, 180), bottomHandPct: n("bottomHandPct", 0, 100),
     wristSnapDegS: n("wristSnapDegS", 0, 5000), swingPlaneDeg: n("swingPlaneDeg", -90, 90), swingDetected: x.swingDetected === true,
     batSpeedKph: n("batSpeedKph", 0, 170), attackAngleDeg: n("attackAngleDeg", -60, 60), swingPathDeg: n("swingPathDeg", -90, 90),
@@ -81,7 +81,7 @@ function batting(x: unknown): BattingBiomech | null {
     weightShiftCm: n("weightShiftCm", 0, 300), hipPeakMs: n("hipPeakMs", -1500, 500), handPeakMs: n("handPeakMs", -1500, 500), chainOrdered: x.chainOrdered === true,
     comShiftCm: n("comShiftCm", -100, 300),
     weightSeries: Array.isArray(x.weightSeries) ? x.weightSeries.slice(0, 34).map((v) => numD(v, 0, 100)) : [],
-    ...(Array.isArray(x.unmeasured) && x.unmeasured.some((u) => u === "weight" || u === "batSpeed") ? { unmeasured: x.unmeasured.filter((u): u is "weight" | "batSpeed" => u === "weight" || u === "batSpeed").slice(0, 2) } : {}),
+    ...(Array.isArray(x.unmeasured) && x.unmeasured.some((u) => u === "weight" || u === "batSpeed" || u === "path") ? { unmeasured: [...new Set(x.unmeasured.filter((u): u is "weight" | "batSpeed" | "path" => u === "weight" || u === "batSpeed" || u === "path"))].slice(0, 3) } : {}),
   };
 }
 

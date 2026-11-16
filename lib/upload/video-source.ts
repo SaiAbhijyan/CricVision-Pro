@@ -51,6 +51,8 @@ export class VideoClipSource implements ClipSource {
     }
   }
 
+  newShot() { this.o.pose?.newShot(); }
+
   async frame(k: number, opt: { pose: boolean; poseCam?: CameraModel }): Promise<ClipFrame> {
     const v = this.o.video;
     await seekTo(v, frameSeekTime(k, this.o.mediaFps));

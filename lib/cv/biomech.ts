@@ -262,7 +262,7 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   return {
     impactIdx: imp, stanceIdx: st, backliftIdx: bl,
     biomech: {
-      frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, backliftDeg: backlift,
+      frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, headOverFrontFootCm: +((fr[imp].j.nose.y - fr[imp].j.lAnk.y) * 100).toFixed(1), backliftDeg: backlift,
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
       batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
       weightShiftCm: shiftCm, comShiftCm, weightSeries, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,

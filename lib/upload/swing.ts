@@ -36,7 +36,10 @@ export function detectSwings(frames: Skeleton[]): number[] {
  *  broadcast footage the hands-speed peak also fires on walking, celebrations, other players and camera moves. */
 export function swingRejectReason(win: Skeleton[], t: number, b: { strideCm: number; headDriftCm: number; backliftDeg: number; downswingMs: number }): string | null {
   const core = win.filter((f) => f.t >= t - 1.0 && f.t <= t + 0.3);
-  if (core.length < 20) return "the batter was not tracked for long enough around the swing";
+  // coverage relative to the pose rate actually used (every frame, every second frame, a 60 or 240 fps clip...)
+  const gaps = win.slice(1).map((f, i) => f.t - win[i].t).filter((d) => d > 0).sort((a, b) => a - b);
+  const dt = gaps.length ? gaps[gaps.length >> 1] : 1 / 30, expected = 1.3 / dt;
+  if (core.length < Math.max(8, 0.6 * expected)) return "the batter was not tracked for long enough around the swing";
   for (let i = 1; i < core.length; i++) {
     const a = core[i - 1].j, c = core[i].j, dt = Math.max(1e-3, core[i].t - core[i - 1].t);
     const hip = Math.hypot((a.lHip.x + a.rHip.x - c.lHip.x - c.rHip.x) / 2, (a.lHip.y + a.rHip.y - c.lHip.y - c.rHip.y) / 2);
@@ -96,6 +99,36 @@ export function finishedSwings(frames: Skeleton[], hand: Handedness, cfg: Sessio
   return out;
 }
 
+const swapLR = (j: Skeleton["j"]): Skeleton["j"] => {
+  const o = { ...j } as Skeleton["j"];
+  for (const k of Object.keys(j) as JointName[]) if (k !== "nose") { const m = (k[0] === "l" ? "r" : "l") + k.slice(1) as JointName; o[m] = j[k]; }
+  return o;
+};
+
+/**
+ * MediaPipe sometimes swaps left and right for a whole shot (side-on and from-behind views), which flips the pitch direction
+ * and every directional number. In the stance a batter looks at the bowler, so the nose sits bowler-side of the hips: if, over
+ * the stance frames, the labelled front foot is consistently on the other side from the nose, the labels are swapped.
+ * Measured on a real highlight reel: the two cues agreed in 10/10 or 0/10 stance frames per shot, never in between.
+ * When the nose offset is too small to tell (under 3 cm), labels are left alone.
+ */
+export function fixLeftRight(frames: Skeleton[], hand: Handedness, stanceBefore?: number): { frames: Skeleton[]; swapped: boolean } {
+  const st = stanceBefore !== undefined ? frames.filter((f) => f.t <= stanceBefore) : [];
+  const use = st.length >= 3 ? st : frames.slice(0, Math.max(3, Math.floor(frames.length / 3)));
+  const front = hand === "RHB" ? "lAnk" : "rAnk", back = hand === "RHB" ? "rAnk" : "lAnk";
+  let agree = 0, disagree = 0;
+  for (const f of use) {
+    const j = f.j, hx = (j.lHip.x + j.rHip.x) / 2, hy = (j.lHip.y + j.rHip.y) / 2;
+    const nx = j.nose.x - hx, ny = j.nose.y - hy;
+    if (Math.hypot(nx, ny) < 0.03) continue;
+    const d = nx * (j[front].x - j[back].x) + ny * (j[front].y - j[back].y);
+    if (d > 0) agree++; else if (d < 0) disagree++;
+  }
+  const n = agree + disagree;
+  if (n >= 3 && disagree >= 0.75 * n) return { frames: frames.map((f) => ({ t: f.t, j: swapLR(f.j) })), swapped: true };
+  return { frames, swapped: false };
+}
+
 /**
  * Turn camera-axis skeletons into the pitch frame without a calibration: a side-on batter's hip and shoulder lines point down
  * the pitch in the stance, so the median of that direction becomes "toward the bowler" (-Y) and the batter is placed at the
@@ -126,4 +159,18 @@ export function alignToStance(frames: Skeleton[], hand: Handedness, creaseY: num
     for (const k of Object.keys(f.j) as (keyof Skeleton["j"])[]) { const p = f.j[k]; j[k] = { x: p.x * cs - p.y * sn - pcx, y: p.x * sn + p.y * cs - pcy + creaseY + 0.15, z: p.z }; }
     return { t: f.t, j };
   });
+}
+
+/** Angle (0-90°) between the stance's pitch direction (hips and shoulders) and the camera's line of sight (+Y in camera-axis
+ *  skeletons). 90 = side-on (stride across the picture), 0 = front-on or from behind (stride along the depth). */
+export function stanceAxisToCameraDeg(frames: Skeleton[], hand: Handedness, stanceBefore?: number): number {
+  const st = stanceBefore !== undefined ? frames.filter((f) => f.t <= stanceBefore) : [];
+  const use = st.length >= 3 ? st : frames;
+  const L = hand === "RHB", angs: number[] = [];
+  for (const f of use) for (const [a, b] of (L ? [["lHip", "rHip"], ["lSh", "rSh"]] : [["rHip", "lHip"], ["rSh", "lSh"]]) as [JointName, JointName][]) {
+    const dx = f.j[a].x - f.j[b].x, dy = f.j[a].y - f.j[b].y;
+    if (Math.hypot(dx, dy) > 0.05) angs.push((Math.atan2(Math.abs(dx), Math.abs(dy)) * 180) / Math.PI);   // 0 = along +Y (depth)
+  }
+  angs.sort((a, b) => a - b);
+  return angs.length ? angs[angs.length >> 1] : 90;
 }

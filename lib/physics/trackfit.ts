@@ -1,8 +1,8 @@
 import type { CameraModel, Pt, Vec3, PitchSurface } from "@/lib/types";
-import { project, unprojectAtHeight } from "./homography";
+import { project, unprojectAtHeight, unprojectAtY } from "./homography";
 import { nelderMead } from "./optim";
 import { simulate, type BallState } from "./ballistics";
-import { PITCH_LENGTH } from "./constants";
+import { BOWLER_CREASE_Y, PITCH_LENGTH } from "./constants";
 
 const RPM = (2 * Math.PI) / 60;
 
@@ -24,6 +24,33 @@ export interface FitResult {
   jackSigmaKph?: number;
   /** final value of the (truncated) cost; internal, for comparing refits */
   fx?: number;
+  /** speed at the first tracked point; `speedMs` is carried back to the release point */
+  speedAtFirstObsMs?: number;
+  /** how far down the pitch the first tracked point was from the nominal release (m) */
+  unseenM?: number;
+}
+
+/** Nominal release point along the pitch, as in the simulator: popping crease + 0.45 m. */
+export const NOMINAL_RELEASE_Y = BOWLER_CREASE_Y + 0.45;
+
+/** Speed at the bowler's release. The fit's state is at the first tracked point; when the far end of the flight was not seen
+ *  (small ball, low camera) that point is metres down the pitch and drag has already slowed the ball (about 1 km/h per metre at
+ *  pace), so that speed is not the release speed a radar or Hawk-Eye reports. Shooting: find the release state whose forward
+ *  flight passes through the fitted first state, and report its speed. */
+export function speedAtRelease(release: Vec3, velocity: Vec3, swingAccel: number, turnRpm: number, surface: PitchSurface): { speedMs: number; unseenM: number } {
+  const v1 = Math.hypot(velocity.x, velocity.y, velocity.z), unseen = release.y - NOMINAL_RELEASE_Y;
+  // nothing to carry back, or the first point may already be past the bounce (back-propagating through it would be wrong)
+  if (unseen <= 0.05 || velocity.y <= 1 || unseen > 10) return { speedMs: v1, unseenM: Math.max(0, unseen) };
+  const T = unseen / velocity.y, w = { x: 0, y: turnRpm * RPM, z: 0 };
+  let p0 = { x: release.x - velocity.x * T, y: release.y - velocity.y * T, z: release.z - velocity.z * T - 0.5 * 9.81 * T * T }, v0 = { x: velocity.x, y: velocity.y, z: velocity.z + 9.81 * T };
+  for (let it = 0; it < 6; it++) {
+    const r = simulate({ p: p0, v: v0, w }, { surface, swingAccel, dt: 0.0005, tMax: T, maxBounces: 0 });
+    const f = r.final, dp = { x: release.x - f.p.x, y: release.y - f.p.y, z: release.z - f.p.z }, dv = { x: velocity.x - f.v.x, y: velocity.y - f.v.y, z: velocity.z - f.v.z };
+    p0 = { x: p0.x + dp.x, y: p0.y + dp.y, z: p0.z + dp.z }; v0 = { x: v0.x + dv.x, y: v0.y + dv.y, z: v0.z + dv.z };
+    if (Math.hypot(dv.x, dv.y, dv.z) < 1e-4) break;
+  }
+  if (p0.z < 0.5 || p0.z > 3.2) return { speedMs: v1, unseenM: unseen };   // no plausible hand height: leave the measured speed
+  return { speedMs: Math.hypot(v0.x, v0.y, v0.z), unseenM: unseen };
 }
 
 /**
@@ -33,7 +60,8 @@ export interface FitResult {
  */
 export function fitFlightTo2D(cam: CameraModel, obs: TrackObs[], surface: PitchSurface): FitResult | null {
   let use: boolean[] | undefined;
-  let fit = fitOnce(cam, obs, surface, use);
+  // search and robust refits run without the speed-uncertainty profile; it is computed once, on the final answer
+  let fit = fitOnce(cam, obs, surface, use, undefined, true);
   // Robust refit: a handful of mis-tracked points (ghosts, a bounce the detector loses) must not drag the whole flight.
   // Drop points whose residual is far above the typical one and fit again; never drop below 60% of the track or 8 points.
   for (let round = 0; fit && round < 2; round++) {
@@ -44,10 +72,11 @@ export function fitFlightTo2D(cam: CameraModel, obs: TrackObs[], surface: PitchS
     const kept = next.filter(Boolean).length;
     if (kept === next.length || kept < Math.max(8, 0.6 * obs.length)) break;
     use = next;
-    const refit = fitOnce(cam, obs, surface, use);
+    const refit = fitOnce(cam, obs, surface, use, undefined, true, [[fit.release.x, fit.release.y, fit.release.z, fit.velocity.x, fit.velocity.y, fit.velocity.z, fit.swingAccel, fit.turnRpm]]);   // the outliers moved the answer, not the basin
     if (!refit) break;
     fit = refit;
   }
+  if (fit) fit = fitOnce(cam, obs, surface, use, undefined, false, [[fit.release.x, fit.release.y, fit.release.z, fit.velocity.x, fit.velocity.y, fit.velocity.z, fit.swingAccel, fit.turnRpm]]);
   if (fit && obs.length >= 12) {
     const ord = obs.map((_, i) => i).sort((a, b) => obs[a].t - obs[b].t), vs: number[] = [], B = 4;
     const x0 = [fit.release.x, fit.release.y, fit.release.z, fit.velocity.x, fit.velocity.y, fit.velocity.z, fit.swingAccel, fit.turnRpm];
@@ -57,15 +86,17 @@ export function fitFlightTo2D(cam: CameraModel, obs: TrackObs[], surface: PitchS
       // the subset's best solution: a local refit from the full answer, or a fresh search if that finds a better fit
       const fl = fitOnce(cam, obs, surface, mask, x0), fg = fitOnce(cam, obs, surface, mask, undefined, true);
       const f2 = fl && fg ? ((fg.fx ?? Infinity) < (fl.fx ?? Infinity) - 1e-6 ? fg : fl) : fl ?? fg;
-      if (f2) vs.push(f2.speedMs * 3.6);
+      if (f2) vs.push(speedAtRelease(f2.release, f2.velocity, f2.swingAccel, f2.turnRpm, surface).speedMs * 3.6);
     }
     if (vs.length >= 3) { const m = vs.reduce((a, b) => a + b, 0) / vs.length; fit.jackSigmaKph = +Math.sqrt(((vs.length - 1) / vs.length) * vs.reduce((a, b) => a + (b - m) ** 2, 0)).toFixed(1); }
   }
+  if (fit) { const r = speedAtRelease(fit.release, fit.velocity, fit.swingAccel, fit.turnRpm, surface); fit.speedAtFirstObsMs = fit.speedMs; fit.speedMs = r.speedMs; fit.unseenM = +r.unseenM.toFixed(2); }
   return fit;
 }
 
 /** `init`: refine locally from this parameter vector instead of searching (used by the jackknife); returns speed only. */
-function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?: boolean[], init?: number[], quick = false): FitResult | null {
+/** `seeds`: start the multi-start search from these parameter vectors instead of the boundary-value grid (robust refits). */
+function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?: boolean[], init?: number[], quick = false, seeds?: number[][]): FitResult | null {
   if (obs.length < 5) return null;
   const first = obs[0], last = obs[obs.length - 1];
   const dur = Math.max(1e-3, last.t - first.t);
@@ -115,10 +146,10 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
   // The flight is a boundary-value problem: back-project the first and last observation at heights (zA, zB), then the
   // launch velocity follows from gravity over the observed duration. So search a coarse (zA, zB) grid, keep the best
   // cells, and only then let the full 8-parameter simplex polish them.
-  const cells: { x: number[]; c: number }[] = [];
+  const cells: { x: number[]; c: number }[] = seeds ? seeds.map((x) => ({ x, c: cost(x) })) : [];
   const lin = (lo: number, hi: number, n: number) => Array.from({ length: n }, (_, i) => lo + ((hi - lo) * i) / (n - 1));
   // A track that spans the bounce is not one parabola, so also anchor the boundary-value guess on earlier points (pre-bounce only).
-  for (const frac of [0.45, 0.65, 0.85, 1]) {
+  if (!seeds) for (const frac of [0.45, 0.65, 0.85, 1]) {
     const li = Math.max(3, Math.min(obs.length - 1, Math.floor(frac * (obs.length - 1)))), lo2 = obs[li], dur2 = Math.max(1e-3, lo2.t - first.t);
     for (const zA of lin(0.5, 2.9, 11)) for (const zB of lin(0.05, 2.3, 11)) {
       const p0 = unprojectAtHeight(cam, first.px, zA), p1 = unprojectAtHeight(cam, lo2.px, zB);
@@ -126,13 +157,23 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
       const x = [p0.x, p0.y, zA, (p1.x - p0.x) / dur2, (p1.y - p0.y) / dur2, (zB - zA) / dur2 + 0.5 * 9.81 * dur2, 0, 0];
       cells.push({ x, c: cost(x) });
     }
+    // also seed the first point by distance along the pitch: when the camera is near release height the first ray is almost
+    // level, its crossing with a height plane runs off to infinity, and the height grid alone never finds the flight
+    for (const y0 of lin(-0.5, 8, 12)) for (const zB of lin(0.05, 2.3, 11)) {
+      const q0 = unprojectAtY(cam, first.px, y0), p1 = unprojectAtHeight(cam, lo2.px, zB);
+      if (!q0 || !p1 || q0.z < 0.3 || q0.z > 3.2) continue;
+      const x = [q0.x, q0.y, q0.z, (p1.x - q0.x) / dur2, (p1.y - q0.y) / dur2, (zB - q0.z) / dur2 + 0.5 * 9.81 * dur2, 0, 0];
+      cells.push({ x, c: cost(x) });
+    }
   }
   if (!cells.length) return null;
   cells.sort((u, v) => u.c - v.c);
   const free6 = (x: number[]) => nelderMead((q) => costQ([...q, 0, 0]), x.slice(0, 6), [0.2, 0.4, 0.2, 0.5, 1.2, 0.5], { maxIter: 500, tol: 1e-7 }).x;
   let best: { x: number[]; fx: number } | null = null;
-  for (const st of cells.slice(0, 14)) {
-    const g = [...free6(st.x), 0, 0];
+  // screen the best grid cells with the cheap 6-parameter pass (neighbouring cells usually fall into the same basin), then
+  // polish only the few most promising with all 8 parameters: about 4x faster than polishing every start, same optimum
+  const screened = cells.slice(0, quick ? 8 : 14).map((st) => { const g = [...free6(st.x), 0, 0]; return { g, c: costQ(g) }; }).sort((u, v) => u.c - v.c);
+  for (const { g } of screened.slice(0, quick ? 2 : 3)) {
     let r = nelderMead(costQ, g, [0.1, 0.2, 0.1, 0.3, 0.8, 0.3, 1, 400], { maxIter: 600, tol: 1e-8 });   // smooth basin first
     r = nelderMead(cost, r.x, [0.05, 0.1, 0.05, 0.15, 0.4, 0.15, 0.5, 200], { maxIter: 500, tol: 1e-9 });   // then the truncated objective
     r = nelderMead(cost, r.x, [0.02, 0.04, 0.02, 0.06, 0.15, 0.06, 0.2, 80], { maxIter: 300, tol: 1e-10 });
@@ -141,7 +182,7 @@ function fitOnce(cam: CameraModel, obs: TrackObs[], surface: PitchSurface, use?:
   }
   if (!best) return null;
   const x = best.x;
-  if (quick) return { release: { x: x[0], y: x[1], z: x[2] }, velocity: { x: x[3], y: x[4], z: x[5] }, speedMs: Math.hypot(x[3], x[4], x[5]), rmsPx: Math.sqrt(best.fx), samples: [], swingAccel: x[6], turnRpm: x[7], speedSigmaKph: 0, fx: best.fx };
+  if (quick) return { release: { x: x[0], y: x[1], z: x[2] }, velocity: { x: x[3], y: x[4], z: x[5] }, speedMs: Math.hypot(x[3], x[4], x[5]), rmsPx: Math.sqrt(best.fx), samples: sample(x, times).map((p, i) => ({ t: times[i], p })), swingAccel: x[6], turnRpm: x[7], speedSigmaKph: 0, fx: best.fx };
   // Profile likelihood on speed: pin speed 8% above and below the optimum, re-optimise everything else, and see how much the
   // pixel residual grows. A flight that fits equally well at 88% and 108% of its speed has no real speed measurement.
   const sp0 = Math.hypot(x[3], x[4], x[5]);

@@ -190,3 +190,26 @@ export function mainSubject(people: LM[][], W: number, H: number, near?: { x: nu
   people.forEach((p, i) => { if (p.length >= 33) { const h = personPixelHeight(p, W, H); if (h > bh) { bh = h; best = i; } } });
   return best;
 }
+
+/**
+ * Follows one person through a clip. Picking "the biggest person" afresh each frame flips between the batter, the keeper and
+ * the umpire when they are similar in size (seen on real broadcast footage). Start from the tapped point or the biggest person,
+ * then keep whoever is nearest the last position. Lost for more than `patienceFrames`: a tapped batter is waited for; otherwise
+ * the biggest person is taken again (e.g. after a camera cut).
+ */
+export class SubjectFollower {
+  private at: { x: number; y: number } | null;
+  private miss = 0;
+  constructor(private tapped: { x: number; y: number } | null = null, private patienceFrames = 15) { this.at = tapped; }
+  pick(people: LM[][], W: number, H: number): number {
+    let i = this.at ? mainSubject(people, W, H, this.at) : -1;
+    if (i < 0) {
+      this.miss++;
+      if (this.at && (this.tapped || this.miss <= this.patienceFrames)) return -1;
+      i = mainSubject(people, W, H);
+      if (i < 0) return -1;
+    }
+    const L = people[i]; this.at = { x: (L[23].x + L[24].x) / 2, y: (L[23].y + L[24].y) / 2 }; this.miss = 0;
+    return i;
+  }
+}
