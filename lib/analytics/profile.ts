@@ -1,3 +1,4 @@
+import { weightOk, batSpeedOk } from "@/lib/cv/biomech";
 /**
  * Player DNA: what the app learns about one player across many sessions.
  *
@@ -105,7 +106,7 @@ export function batterDNA(sessions: SessionLike[]): BatterDNA {
     archetype = (Object.entries(score).sort((a, b) => b[1] - a[1])[0][0]) as Archetype;
   }
 
-  const ff = avg(bats.map((b) => b.frontFootPct));
+  const ff = avg(bats.filter(weightOk).map((b) => b.frontFootPct));
   const footLabel = ff >= 58 ? "Front-foot player" : ff <= 42 ? "Back-foot player" : "Balanced";
 
   const zoneRows = ZONES.map((zone) => {
@@ -139,7 +140,7 @@ export function batterDNA(sessions: SessionLike[]): BatterDNA {
     headDriftCm: m_sd(bats.map((b) => Math.abs(b.headDriftCm))),
     triggerMs: m_sd(bats.map((b) => b.triggerMs)),
     strideCm: m_sd(bats.map((b) => b.strideCm)),
-    batSpeedKph: m_sd(bats.map((b) => b.batSpeedKph).filter((v) => v > 5)),
+    batSpeedKph: m_sd(bats.filter(batSpeedOk).map((b) => b.batSpeedKph).filter((v) => v > 5)),
     attackAngleDeg: m_sd(bats.map((b) => b.attackAngleDeg)),
     swingPathDeg: m_sd(bats.map((b) => b.swingPathDeg)),
     downswingMs: m_sd(bats.map((b) => b.downswingMs).filter((v) => v > 50)),
@@ -158,8 +159,8 @@ export function batterDNA(sessions: SessionLike[]): BatterDNA {
       strikeRate: pct(fc.reduce((a, b) => a + b.outcome.runs, 0), fc.length),
       sweetPct: pct(sh.filter((b) => b.timing === "Middle / Sweet Spot").length, sh.length),
       headDriftAbsCm: avg(bt.map((b) => Math.abs(b.headDriftCm))),
-      batSpeedKph: avg(bt.map((b) => b.batSpeedKph).filter((v) => v > 5)),
-      frontFootPct: avg(bt.map((b) => b.frontFootPct)),
+      batSpeedKph: avg(bt.filter(batSpeedOk).map((b) => b.batSpeedKph).filter((v) => v > 5)),
+      frontFootPct: avg(bt.filter(weightOk).map((b) => b.frontFootPct)),
       dotPct: pct(fc.filter((b) => b.outcome.runs + b.outcome.extraRuns === 0).length, fc.length),
     };
   }).filter((p) => p.shots >= 3);

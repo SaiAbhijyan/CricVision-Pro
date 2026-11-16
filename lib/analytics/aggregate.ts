@@ -1,3 +1,4 @@
+import { weightOk, batSpeedOk } from "@/lib/cv/biomech";
 import type { BallRecord, LengthClass, LineClass } from "@/lib/types";
 
 const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -5,7 +6,7 @@ const pct = (n: number, d: number) => (d ? (100 * n) / d : 0);
 
 export interface BatPoint { ball: number; frontFoot: number; headDrift: number; stride: number; backlift: number; wrist: number; exitKph: number | null; swing: boolean }
 export const batSeries = (balls: BallRecord[]): BatPoint[] =>
-  balls.filter((b) => b.batting).map((b) => ({
+  balls.filter((b) => weightOk(b.batting)).map((b) => ({
     ball: b.index, frontFoot: b.batting!.frontFootPct, headDrift: b.batting!.headDriftCm, stride: b.batting!.strideCm,
     backlift: b.batting!.backliftDeg, wrist: b.batting!.wristSnapDegS, exitKph: b.ballistics?.exitSpeedKph ?? null, swing: b.batting!.swingDetected,
   }));

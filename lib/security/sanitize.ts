@@ -81,6 +81,7 @@ function batting(x: unknown): BattingBiomech | null {
     weightShiftCm: n("weightShiftCm", 0, 300), hipPeakMs: n("hipPeakMs", -1500, 500), handPeakMs: n("handPeakMs", -1500, 500), chainOrdered: x.chainOrdered === true,
     comShiftCm: n("comShiftCm", -100, 300),
     weightSeries: Array.isArray(x.weightSeries) ? x.weightSeries.slice(0, 34).map((v) => numD(v, 0, 100)) : [],
+    ...(Array.isArray(x.unmeasured) && x.unmeasured.some((u) => u === "weight" || u === "batSpeed") ? { unmeasured: x.unmeasured.filter((u): u is "weight" | "batSpeed" => u === "weight" || u === "batSpeed").slice(0, 2) } : {}),
   };
 }
 

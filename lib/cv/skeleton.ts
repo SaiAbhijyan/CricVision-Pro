@@ -138,3 +138,21 @@ export function liftWeakPerspective(
   for (const k of JOINTS) j[k] = { x: P.x + off[k].x - hm.x, y: P.y + off[k].y - hm.y, z: P.z + off[k].z - hm.z };
   return { t, j };
 }
+
+/** Centred moving average of every joint over +-`halfWinS` seconds (at least one neighbour each side). Pose landmarks
+ *  jitter by a few centimetres frame to frame; speeds and the weight split are differences of positions, so they amplify it. */
+export function smoothSkeletons(frames: Skeleton[], halfWinS = 0.05): Skeleton[] {
+  const n = frames.length;
+  return frames.map((f, i) => {
+    let a = i, b = i;
+    while (a > 0 && (f.t - frames[a - 1].t <= halfWinS || a === i)) a--;
+    while (b < n - 1 && (frames[b + 1].t - f.t <= halfWinS || b === i)) b++;
+    const j = {} as Joints;
+    for (const k of JOINTS) {
+      let x = 0, y = 0, z = 0;
+      for (let q = a; q <= b; q++) { const p = frames[q].j[k]; x += p.x; y += p.y; z += p.z; }
+      const m = b - a + 1; j[k] = { x: x / m, y: y / m, z: z / m };
+    }
+    return { t: f.t, j };
+  });
+}

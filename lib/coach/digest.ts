@@ -13,9 +13,9 @@ export function ballDigest(b: BallRecord) {
       counterRotDeg: r1(b.bowling.counterRotationDeg), xFactorDeg: r1(b.bowling.hipShoulderSepDeg), releaseH: r1(b.bowling.releaseHeightM), disguise: b.bowling.disguiseScore,
     },
     bat: b.batting && {
-      frontFootPct: r1(b.batting.frontFootPct), headDriftCm: r1(b.batting.headDriftCm), strideCm: r1(b.batting.strideCm),
+      frontFootPct: b.batting.unmeasured?.includes("weight") ? null : r1(b.batting.frontFootPct), headDriftCm: r1(b.batting.headDriftCm), strideCm: r1(b.batting.strideCm),
       triggerMs: r1(b.batting.triggerMs), backliftDeg: r1(b.batting.backliftDeg), bottomHandPct: r1(b.batting.bottomHandPct),
-      batKph: r1(b.batting.batSpeedKph), attackDeg: r1(b.batting.attackAngleDeg), pathDeg: r1(b.batting.swingPathDeg),
+      batKph: b.batting.unmeasured?.includes("batSpeed") ? null : r1(b.batting.batSpeedKph), attackDeg: r1(b.batting.attackAngleDeg), pathDeg: r1(b.batting.swingPathDeg),
     },
     move: b.movement && { airSwingCm: r1(b.movement.airSwingCm), turnCm: r1(b.movement.turnCm), floatM: r1(b.movement.pitchShiftM), swing: b.movement.swingType, turn: b.movement.turnType },
     flags: b.flags,

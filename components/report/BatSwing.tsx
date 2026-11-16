@@ -1,3 +1,4 @@
+import { weightOk, batSpeedOk } from "@/lib/cv/biomech";
 "use client";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import type { BallRecord } from "@/lib/types";
@@ -10,24 +11,26 @@ const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.le
 
 /** Bat swing and weight transfer, per shot: how fast, from what angle, and where the body weight was. */
 export default function BatSwing({ balls }: { balls: BallRecord[] }) {
-  const sw = balls.filter((b) => b.batting?.swingDetected && b.batting.batSpeedKph > 5);
+  const sw = balls.filter((b) => b.batting?.swingDetected);
   if (!sw.length) return null;
   const bt = sw.map((b) => b.batting!);
+  const bs = bt.filter((b) => batSpeedOk(b) && b.batSpeedKph > 5), ws = bt.filter(weightOk);
+  const na = "not measured";
   const tiles: [string, string, string][] = [
-    ["Bat speed", `${avg(bt.map((b) => b.batSpeedKph)).toFixed(0)} km/h`, `peak ${Math.max(...bt.map((b) => b.batSpeedKph)).toFixed(0)}`],
+    ["Bat speed", bs.length ? `${avg(bs.map((b) => b.batSpeedKph)).toFixed(0)} km/h` : na, bs.length ? `peak ${Math.max(...bs.map((b) => b.batSpeedKph)).toFixed(0)}` : "hands moved implausibly fast: check the slow-motion setting"],
     ["Attack angle", `${avg(bt.map((b) => b.attackAngleDeg)).toFixed(0)}°`, "+ upward through the ball"],
     ["Swing path", `${avg(bt.map((b) => b.swingPathDeg)).toFixed(0)}°`, "0 = straight, + across to leg"],
     ["Downswing", `${avg(bt.map((b) => b.downswingMs)).toFixed(0)} ms`, `${avg(bt.map((b) => b.swingArcCm)).toFixed(0)} cm arc`],
-    ["Weight on front foot", `${avg(bt.map((b) => b.frontFootPct)).toFixed(0)}%`, "whole-body centre of gravity, at contact"],
-    ["Centre of gravity travel", `${avg(bt.map((b) => b.comShiftCm)).toFixed(0)} cm`, "head to toe, toward the bowler"],
+    ["Weight on front foot", ws.length ? `${avg(ws.map((b) => b.frontFootPct)).toFixed(0)}%` : na, ws.length ? "whole-body centre of gravity, at contact" : "this camera looks along the stride; film side-on to measure it"],
+    ["Centre of gravity travel", ws.length ? `${avg(ws.map((b) => b.comShiftCm)).toFixed(0)} cm` : na, "head to toe, toward the bowler"],
     ["Head drift", `${avg(bt.map((b) => Math.abs(b.headDriftCm))).toFixed(1)} cm`, "off the line, average"],
   ];
-  const curves = sw.map((b) => b.batting!.weightSeries).filter((a) => a && a.length === 34);
+  const curves = sw.filter((b) => weightOk(b.batting)).map((b) => b.batting!.weightSeries).filter((a) => a && a.length === 34);
   const wcurve = curves.length ? Array.from({ length: 34 }, (_, k) => ({ ms: Math.round(-450 + (550 * k) / 33), front: avg(curves.map((a) => a[k])), back: 100 - avg(curves.map((a) => a[k])) })) : [];
-  const speedVsExit = sw.filter((b) => b.ballistics).map((b) => ({ x: b.batting!.batSpeedKph, y: b.ballistics!.exitSpeedKph, edge: b.timing === "Edge" }));
+  const speedVsExit = sw.filter((b) => b.ballistics && batSpeedOk(b.batting)).map((b) => ({ x: b.batting!.batSpeedKph, y: b.ballistics!.exitSpeedKph, edge: b.timing === "Edge" }));
   const byLen = (["Yorker", "Full", "Good", "Short"] as const).map((len) => {
-    const bs = sw.filter((b) => b.length === len);
-    return { length: `${len} (${bs.length})`, front: avg(bs.map((b) => b.batting!.frontFootPct)) };
+    const lb = sw.filter((b) => b.length === len && weightOk(b.batting));
+    return { length: `${len} (${lb.length})`, front: avg(lb.map((b) => b.batting!.frontFootPct)) };
   });
   return (
     <section className="space-y-3">

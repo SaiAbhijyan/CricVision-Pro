@@ -37,9 +37,11 @@ export function offlineReport(s: SessionSummary): CoachReport {
   const sw = s.balls.filter((b) => b.flags.includes("Swing only (no ball tracked)") && b.batting);
   if (sw.length) {
     const bt = sw.map((b) => b.batting!), m = (f: (x: typeof bt[number]) => number) => avg(bt.map(f));
-    right.push(`${sw.length} swing${sw.length > 1 ? "s" : ""} measured: bat speed about ${m((x) => x.batSpeedKph).toFixed(0)} km/h, ${m((x) => x.frontFootPct).toFixed(0)}% of weight on the front foot at contact.`);
+    const bsp = bt.filter((x) => !x.unmeasured?.includes("batSpeed")), wgt = bt.filter((x) => !x.unmeasured?.includes("weight"));
+    const mm = (a: typeof bt, f: (x: typeof bt[number]) => number) => avg(a.map(f));
+    right.push(`${sw.length} swing${sw.length > 1 ? "s" : ""} measured` + (bsp.length ? `: bat speed about ${mm(bsp, (x) => x.batSpeedKph).toFixed(0)} km/h` : "") + (wgt.length ? `, ${mm(wgt, (x) => x.frontFootPct).toFixed(0)}% of weight on the front foot at contact` : "") + ".");
     if (m((x) => Math.abs(x.headDriftCm)) > 8) wrong.push({ issue: "Head drifting off the line", rootCause: "Weight is not transferring over the front foot, so the head falls away as the bat comes through.", evidence: `Mean |head drift| ${m((x) => Math.abs(x.headDriftCm)).toFixed(1)} cm across ${sw.length} swing${sw.length > 1 ? "s" : ""}.` });
-    if (m((x) => x.frontFootPct) < 45) wrong.push({ issue: "Weight stays on the back foot", rootCause: "The stride does not carry the body toward the ball.", evidence: `${m((x) => x.frontFootPct).toFixed(0)}% on the front foot at contact.` });
+    if (wgt.length && mm(wgt, (x) => x.frontFootPct) < 45) wrong.push({ issue: "Weight stays on the back foot", rootCause: "The stride does not carry the body toward the ball.", evidence: `${mm(wgt, (x) => x.frontFootPct).toFixed(0)}% on the front foot at contact.` });
   }
   if (bs.length >= 3) {
     const drift = avg(bs.map((p) => Math.abs(p.headDrift)));

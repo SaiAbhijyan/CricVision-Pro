@@ -268,6 +268,21 @@ async function main() {
     ok(!!a && !!b && Math.abs((b.j.lHip.x - a.j.lHip.x) - 0.1 * 1920 * 0.004) < 1e-6, "long-lens lift: moving 10% of the frame moves the body by pixels x scale");
     ok(liftWeakPerspective([], [], 0, { metresPerPx: 0.004, refPx: 0, imageWidth: 1, pitchDeg: 0, hipY: 0 }) === null, "long-lens lift: bad input gives null"); }
 
+  { // unreliable swing numbers are marked, not shown as fact
+    const { extractBatting } = await import("../lib/cv/biomech");
+    const clean = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 80 }));
+    const c = extractBatting(clean, { hand: "RHB", impactT: 0.55 })!;
+    ok(!c.biomech.unmeasured, "a clean synthetic swing is fully measured");
+    const r = rng(11);
+    const noisy = clean.map((f) => { const j = { ...f.j } as typeof f.j; for (const k of Object.keys(j) as (keyof typeof j)[]) j[k] = { ...j[k], y: j[k].y + (r() - 0.5) * 0.9 }; return { t: f.t, j }; });
+    const nb = extractBatting(noisy, { hand: "RHB", impactT: 0.55 })!;
+    ok(nb.biomech.unmeasured?.includes("weight") === true, "depth noise along the stride marks weight as unmeasured");
+    const fast = clean.map((f) => ({ ...f, t: f.t / 6 }));   // wrong slow-motion factor
+    const fb = extractBatting(fast, { hand: "RHB", impactT: 0.55 / 6 })!;
+    ok(fb.biomech.unmeasured?.includes("batSpeed") === true, `an impossible bat speed is marked unmeasured (raw ${fb.biomech.batSpeedKph})`);
+    const sb = sanitizeBall({ ...(await analyseClip(rc().src, { cfg, cal: mkCal("batter"), impacts: [] })).balls[0], batting: { ...nb.biomech, unmeasured: ["weight", "evil"] } });
+    ok(JSON.stringify(sb?.batting?.unmeasured) === '["weight"]', "sanitizer keeps only known unmeasured tags"); }
+
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

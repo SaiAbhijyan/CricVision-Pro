@@ -178,6 +178,9 @@ export interface BattingBiomech {
   handPeakMs: number;
   /** true when peak speed moved from the hips, to the shoulders, to the hands, in that order (an efficient kinetic chain) */
   chainOrdered: boolean;
+  /** numbers the footage could not support (shown as "not measured", left out of averages): the weight split jumped
+   *  around or left the feet, or the hands moved implausibly fast (wrong slow-motion factor, tracking error) */
+  unmeasured?: ("weight" | "batSpeed")[];
 }
 
 export type TimingClass = "Early" | "Middle / Sweet Spot" | "Late" | "Edge" | "Pad/Miss";

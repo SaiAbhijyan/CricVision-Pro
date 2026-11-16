@@ -66,7 +66,7 @@ export function buildLiveBall(i: LiveBallInput): LiveBallResult | null {
 
   let errM = 0;
   if (sC && batBio) {
-    const P = batBio.frontFootPct / 100, stride = batBio.strideCm / 100;
+    const P = (batBio.unmeasured?.includes("weight") ? 60 : batBio.frontFootPct) / 100, stride = batBio.strideCm / 100;
     const yIdeal = lerp(BATTER_CREASE_Y + 0.1, BATTER_CREASE_Y + 0.15 - 0.3 - stride - 0.1, P);
     errM = yIdeal - sC.p.y;
   }
@@ -96,7 +96,7 @@ export function buildLiveBall(i: LiveBallInput): LiveBallResult | null {
     notes.push(fr.note);
     if (fr.kind === "caught") wicket = "caught"; else { runs = fr.runs; boundary = fr.boundary; }
     shotPath = sr.samples.filter((_, k) => k % 3 === 0).map((s) => s.p);
-    shot = classifyShot({ azimuthDeg: az, elevationDeg: el, exitSpeedMs: spd, hand: cfg.handedness, length: length ?? "Full", frontFootPct: batBio?.frontFootPct ?? 50, spin, contact: true, swingDetected: true });
+    shot = classifyShot({ azimuthDeg: az, elevationDeg: el, exitSpeedMs: spd, hand: cfg.handedness, length: length ?? "Full", frontFootPct: batBio && !batBio.unmeasured?.includes("weight") ? batBio.frontFootPct : 50, spin, contact: true, swingDetected: true });
     const end = sr.crossing?.p ?? sr.rest?.p ?? sr.samples[sr.samples.length - 1].p;
     wagon = { azimuthDeg: az, runs: boundary ?? runs, boundary, distance: Math.hypot(end.x - sC.p.x, end.y - sC.p.y) };
   } else if (padFirst && sC) {

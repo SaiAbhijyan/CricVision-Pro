@@ -2,7 +2,7 @@ import { centreOfMass, weightState } from "./com";
 import type { BattingBiomech, BowlerArm, BowlingBiomech, Handedness } from "@/lib/types";
 import { BOWLER_CREASE_Y, RETURN_CREASE_HALF, clamp, deg, wrap180 } from "@/lib/physics/constants";
 import {
-  angleAt, angleBetween, horiz, len, mid, mirrorSkeleton, sub, type JointName, type Skeleton,
+  angleAt, angleBetween, horiz, len, mid, mirrorSkeleton, smoothSkeletons, sub, type JointName, type Skeleton,
 } from "./skeleton";
 
 /* ===================================================================================
@@ -150,7 +150,7 @@ export interface BatExtract { biomech: BattingBiomech; impactIdx: number; stance
 
 export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; impactT: number }): BatExtract | null {
   if (frames.length < 10) return null;
-  const fr = opts.hand === "LHB" ? frames.map(mirrorSkeleton) : frames;
+  const fr = smoothSkeletons(opts.hand === "LHB" ? frames.map(mirrorSkeleton) : frames);
   const n = fr.length;
   const imp = nearestIdx(fr, opts.impactT);
   const st = 0;
@@ -159,7 +159,14 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   // weight transfer: whole-body centre of mass projected between the back and front foot (see ./com).
   // Frames are mirrored for left-handers, so the batter always faces with the left foot forward here.
   const wAt = (i: number) => weightState(fr[i].j, "RHB");
-  const frontPct = clamp(wAt(imp).frontPct, 0, 100);
+  const rawFront = wAt(imp).frontPct;
+  const frontPct = clamp(rawFront, 0, 100);
+  // weight split stability: the median frame-to-frame change over the last 450 ms. A real weight transfer is smooth; a split
+  // that jumps tens of points between neighbouring frames is depth noise from a view that looks along the stride.
+  const wJumps: number[] = [];
+  for (let i = Math.max(1, nearestIdx(fr, fr[imp].t - 0.45)); i <= imp; i++) wJumps.push(Math.abs(wAt(i).frontPct - wAt(i - 1).frontPct) / Math.max(1, (fr[i].t - fr[i - 1].t) * 30));
+  wJumps.sort((a, b) => a - b);
+  const wJitter = wJumps.length ? wJumps[Math.floor(wJumps.length / 2)] : 0;
   const comImp = centreOfMass(fr[imp].j), comSt = centreOfMass(fr[st].j);
   const comShiftCm = (comSt.y - comImp.y) * 100; // + = toward the bowler
   // weight-on-front-foot curve: 34 samples from 450 ms before contact to 100 ms after, so shots line up at contact
@@ -225,7 +232,11 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   const hSpeed = Math.hypot(vImp.x, vImp.y);
   const attack = deg(Math.atan2(vImp.z, Math.max(1e-6, hSpeed)));
   const path = deg(Math.atan2(vImp.x, Math.max(1e-6, -vImp.y)));
-  const batSpeedKph = clamp((3.0 * peakHand + ((snap * Math.PI) / 180) * 0.65) * 3.6, 0, 170);
+  const rawBat = (3.0 * peakHand + ((snap * Math.PI) / 180) * 0.65) * 3.6;
+  const batSpeedKph = clamp(rawBat, 0, 170);
+  const unmeasured: ("weight" | "batSpeed")[] = [];
+  if (rawFront < -10 || rawFront > 110 || wJitter > 10) unmeasured.push("weight");
+  if (rawBat > 150 || peakHand > 16) unmeasured.push("batSpeed");
   const downMs = Math.max(0, (fr[imp].t - fr[bl].t) * 1000);
 
   // ---- kinetic chain: when did the hips, shoulders and hands each move fastest, relative to contact? ----
@@ -255,6 +266,11 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
       batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
       weightShiftCm: shiftCm, comShiftCm, weightSeries, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,
+      ...(unmeasured.length ? { unmeasured } : {}),
     },
   };
 }
+
+/** The weight split and bat speed are left out wherever the footage could not support them. */
+export const weightOk = (b: BattingBiomech | null | undefined): b is BattingBiomech => !!b && !b.unmeasured?.includes("weight");
+export const batSpeedOk = (b: BattingBiomech | null | undefined): b is BattingBiomech => !!b && !b.unmeasured?.includes("batSpeed");
