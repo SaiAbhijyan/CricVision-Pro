@@ -1,4 +1,5 @@
 /** Assertion checks for clip upload: helpers, audio impacts, calibration orientation, fit robustness, segmentation, sanitising. Exit 1 on failure. */
+import { extractBatting as extractBattingSync } from "../lib/cv/biomech";
 import { virtualCalibration } from "../lib/sim/virtual-camera";
 import { buildCameraModel, project } from "../lib/physics/homography";
 import { fitFlightTo2D } from "../lib/physics/trackfit";
@@ -14,7 +15,7 @@ import { CutDetector, shotsFromCuts } from "../lib/upload/shots";
 import { applyZP, composeZP, estimateZoomPan, invertZP, warpGray } from "../lib/cv/stabilise";
 import { mapCalibration } from "../lib/upload/analyse";
 import { liftWeakPerspective } from "../lib/cv/skeleton";
-import { alignToStance, detectSwings, finishedSwings } from "../lib/upload/swing";
+import { alignToStance, detectSwings, finishedSwings, fixLeftRight, stanceAxisToCameraDeg } from "../lib/upload/swing";
 import { sanitizeBall } from "../lib/security/sanitize";
 import { renderClip, rng, gauss } from "./lib/synth-clip";
 import type { SessionConfig, Pt } from "../lib/types";
@@ -46,6 +47,7 @@ function concat(a: ClipSource, b: ClipSource, gapS: number): ClipSource {
   return { ...a, frameCount: a.frameCount + b.frameCount, frame: async (k, o) => (k < a.frameCount ? a.frame(k, o) : (async () => { const f = await b.frame(k - a.frameCount, o); return { ...f, t: f.t + offset }; })()) };
 }
 
+function extractBattingRef(sk: ReturnType<typeof generateBatter>): number { return extractBattingSync(sk, { hand: "RHB", impactT: 0.55 })!.biomech.frontFootPct; }
 async function main() {
   /* ---- file validation ---- */
   ok(validateUpload({ name: "a.mp4", size: 1e6, type: "video/mp4" }) === null, "mp4 accepted");
@@ -375,6 +377,50 @@ async function main() {
     ok(rz.warnings.some((w2) => /zoomed 1\.[45]x/.test(w2)), `zoom reported to the user (${rz.warnings[0]?.slice(0, 60)})`);
     const rf = await analyseClip(zoomed, { cfg, cal: calZ, impacts: [] });
     ok(rf.balls.every((b) => Math.abs((b.speedKph ?? 0) - 125) < 8 || (b.quality?.confidence ?? 0) <= 0.35), `zooming camera, NOT compensated: no confident wrong speed (${rf.balls.map((b) => `${b.speedKph?.toFixed(0)}@${b.quality?.confidence}`)})`); }
+
+  { // MediaPipe left/right swaps: detected from the stance (nose bowler-side of the hips) and corrected
+    const { extractBatting } = await import("../lib/cv/biomech");
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const lean = sk.map((f) => ({ t: f.t, j: { ...f.j, nose: { ...f.j.nose, y: f.j.nose.y - 0.08 } } }));   // head toward the bowler (-Y)
+    const swap = (j: typeof sk[number]["j"]) => { const o = { ...j } as typeof j; for (const k of Object.keys(j) as (keyof typeof j)[]) if (k !== "nose") (o as Record<string, unknown>)[(k[0] === "l" ? "r" : "l") + k.slice(1)] = j[k]; return o; };
+    const ref = extractBatting(lean, { hand: "RHB", impactT: 0.55 })!.biomech;
+    const sw = lean.map((f) => ({ t: f.t, j: swap(f.j) }));
+    const fixed = fixLeftRight(sw, "RHB", 0.0);
+    const fb = extractBatting(fixed.frames, { hand: "RHB", impactT: 0.55 })!.biomech;
+    ok(fixed.swapped && Math.abs(fb.frontFootPct - ref.frontFootPct) < 1, `swapped labels detected and corrected (front ${fb.frontFootPct.toFixed(0)} vs ${ref.frontFootPct.toFixed(0)})`);
+    ok(!fixLeftRight(lean, "RHB", 0.0).swapped, "correct labels are left alone");
+    // the synthetic stride carries the head toward the bowler, so pin the nose over the hips: no cue at all
+    const flat = sk.map((f) => ({ t: f.t, j: { ...f.j, nose: { ...f.j.nose, x: (f.j.lHip.x + f.j.rHip.x) / 2, y: (f.j.lHip.y + f.j.rHip.y) / 2 } } }));
+    ok(!fixLeftRight(flat, "RHB", 0.0).swapped && !fixLeftRight(flat.map((f) => ({ t: f.t, j: swap(f.j) })), "RHB", 0.0).swapped, "no nose offset: cannot tell, labels unchanged");
+    const lhb = fixLeftRight(lean, "LHB", 0.0);
+    ok(lhb.swapped, "a right-hander's stance read as left-handed is flagged as swapped (the cue is handedness-aware)"); }
+
+  { // following one person; camera view gating
+    const { SubjectFollower } = await import("../lib/cv/skeleton");
+    const person = (cx: number, cy: number, h: number) => Array.from({ length: 33 }, (_, i) => ({ x: cx, y: i === 0 ? cy - h / 2 : i === 27 || i === 28 ? cy + h / 2 : i === 23 || i === 24 ? cy : cy }));
+    const f = new SubjectFollower();
+    ok(f.pick([person(0.3, 0.5, 0.4), person(0.7, 0.5, 0.3)], 640, 360) === 0, "follower starts with the biggest person");
+    ok(f.pick([person(0.7, 0.5, 0.45), person(0.31, 0.5, 0.38)], 640, 360) === 1, "follower keeps the same person when someone else becomes bigger");
+    let lost = -2; for (let i = 0; i < 10; i++) lost = f.pick([person(0.8, 0.5, 0.5)], 640, 360);
+    ok(lost === -1, "follower waits when its person briefly disappears");
+    let back = -2; for (let i = 0; i < 10; i++) back = f.pick([person(0.8, 0.5, 0.5)], 640, 360);
+    ok(back === 0, "follower re-acquires the biggest person after a sustained loss");
+    const t = new SubjectFollower({ x: 0.3, y: 0.5 });
+    let w = -2; for (let i = 0; i < 40; i++) w = t.pick([person(0.8, 0.5, 0.5)], 640, 360);
+    ok(w === -1, "a tapped batter is waited for, never swapped for someone else");
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const rot = (yaw: number) => { const a = (yaw * Math.PI) / 180, c = Math.cos(a), s2 = Math.sin(a); return sk.map((fr) => { const j = {} as typeof fr.j; for (const k of Object.keys(fr.j) as (keyof typeof fr.j)[]) { const p = fr.j[k]; j[k] = { x: p.x * c - p.y * s2, y: p.x * s2 + p.y * c, z: p.z }; } return { t: fr.t, j }; }); };
+    const front = stanceAxisToCameraDeg(rot(0), "RHB", 0), side = stanceAxisToCameraDeg(rot(90), "RHB", 0);
+    ok(front < 15 && side > 75, `view angle: front-on ${front.toFixed(0)}°, side-on ${side.toFixed(0)}°`);
+    const blank = { w: 64, h: 36, data: new Uint8ClampedArray(64 * 36).fill(100) };
+    const run = async (frames: typeof sk) => analyseClip({ analysisWidth: 64, width: 1280, height: 720, fps: 30, frameCount: frames.length, frame: async (k) => ({ t: frames[k].t, gray: blank, pose: { bowler: null, batter: frames[k], people: 1 } }) }, { cfg, cal: null, impacts: [] });
+    const rf = await run(rot(0)), rs = await run(rot(90));
+    ok(rf.balls.length === 1 && rf.balls[0].batting?.unmeasured?.includes("weight") === true && rf.balls[0].batting?.unmeasured?.includes("path") === true, "front-on batting footage: weight and path not measured");
+    ok(rs.balls.length === 1 && !rs.balls[0].batting?.unmeasured?.includes("weight") && !rs.balls[0].batting?.unmeasured?.includes("path"), "side-on batting footage: weight and path measured");
+    // contact is the hands' speed peak; the synthetic batter's hands nearly stop at impact, so its peak leads contact by ~0.1 s
+    // (real drives keep the hands moving). This check is about view gating, so the reference uses the detected contact time.
+    const tDet = detectSwings(sk)[0] ?? 0.55;
+    ok(Math.abs((rs.balls[0]?.batting?.frontFootPct ?? 0) - extractBattingSync(sk, { hand: "RHB", impactT: tDet })!.biomech.frontFootPct) < 3, `side-on weight matches the reference (${rs.balls[0]?.batting?.frontFootPct?.toFixed(1)} vs ${extractBattingRef(sk).toFixed(1)}; front-on run ${rf.balls[0]?.batting?.frontFootPct?.toFixed(1)})`); }
 
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

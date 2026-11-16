@@ -208,7 +208,7 @@ flowchart TD
   B --> L
 ```
 
-* **Pose.** MediaPipe Pose Landmarker (`@mediapipe/tasks-vision`) runs on-device. Landmarks are normalised (0 to 1) image coordinates; the world-frame lift is in §4.3. The WASM runtime and model load from a CDN by default (see [limitations](#8-known-limitations)).
+* **Pose.** MediaPipe Pose Landmarker (`@mediapipe/tasks-vision`) runs on-device: the full model for uploads, the lite model live. Both models and the WASM runtime are self-hosted and SHA-256 pinned (`npm run vendor:models`, run on install), so a session makes no third-party requests. `startPose` tries GPU then CPU, each with a timeout, so a broken GPU never stalls a session. One person is followed through a clip (`SubjectFollower`, reset at camera cuts), and MediaPipe's left/right swaps are corrected from the stance (`fixLeftRight`). Live, ball tracking always gets every frame: pose runs only as often as its measured cost allows, and the status line shows both rates.
 * **Ball.** A small, fast object is hard to detect directly. We look for moving blobs (frame differencing plus optical flow) near the predicted position, and a **Kalman filter** smooths the track and predicts through missed frames.
 * **Skeleton.** The 33 landmarks are reduced to 19 joints per player for storage and overlay (layout in `CLIP_LANDMARK_LAYOUT`; `-1` means missing).
 * **Frame ring.** `FrameRing<T>` keeps only the last few seconds of frames, so memory stays bounded.
@@ -426,11 +426,13 @@ Built from every session stored on the device. Batting: archetype (withheld belo
 
 *Files: `lib/physics/trackfit.ts`, `lib/live/fit.worker.ts`*
 
-An 8-parameter fit (release position, velocity, swing, spin) to the tracked pixels, with a ridge prior, a boundary-value grid search and a two-stage Nelder-Mead, run in a Web Worker (about 3 s per ball). With one camera, swing and spin are partly confounded and magnitudes can be off by up to about 15 cm.
+An 8-parameter fit (release position, velocity, swing, spin) to the tracked pixels, with a ridge prior, a boundary-value grid search and a two-stage Nelder-Mead, run in a Web Worker (about 12 s per ball on a 2-core machine; tracking carries on meanwhile). With one camera, swing and spin are partly confounded and magnitudes can be off by up to about 15 cm.
+
+The fit's state is at the first tracked point. When the far end of the flight is not seen (a small ball, a low camera) that point is metres down the pitch, where drag has already slowed the ball, so the reported speed is carried back to the release point (`speedAtRelease`), which is what a radar or Hawk-Eye quotes. Live and uploaded deliveries pass one refusal policy (`gateFlight`): fit error over 8 px, confidence under 35% or speed uncertainty over ±20 km/h is refused with the reason, never shown. A camera under 2 m high floors the uncertainty at ±5 km/h and says so: on synthetic deliveries a 1.3 m tripod read 4-5 km/h low while every residual looked tight, and 2.2-2.4 m read within 1 km/h. **Set the phone about 5 m behind the stumps, 2-2.5 m high.**
 
 ### 4.15 Security
 
-See [SECURITY.md](SECURITY.md): allowlist reconstruction of all client data, same-origin checks, rate limits, size caps, strict headers, and self-hosting of the vision models.
+See [SECURITY.md](SECURITY.md): allowlist reconstruction of all client data, same-origin checks, rate limits, size caps, strict headers, and self-hosting of the vision models. The CSP has no `unsafe-eval`, and `scripts/checks.ts` fails the build if client code evaluates strings. DAST: `.github/workflows/hawkscan.yml` runs StackHawk HawkScan against a production build on every push and PR once the `HAWK_API_KEY` secret and `HAWK_APP_ID` variable are set (`stackhawk.yml`).
 
 ### 4.16 Comparison with commercial tools
 
@@ -491,10 +493,10 @@ Without a key the coach runs in offline mode.
 
 ## 8. Known limitations
 
-* **The live camera path has not been validated on real hardware.** It compiles and its maths is covered by synthetic tests; expect to tune thresholds on a real device.
+* **The live camera path has not been validated on real hardware.** It is tested end to end in headless Chrome with a fake camera playing a synthetic delivery (camera, calibration, detection, fit, report: zero third-party requests, zero errors), but not on a phone at a net.
 * **Monocular approximations.** One camera cannot measure depth directly; exit azimuth/elevation and speeds are estimates (see §4.6).
 * **Model names.** `gemini-4-hydrogen` and `gemini-4-carbon` follow the project specification; change them in `.env.local` if your account uses different IDs.
-* **Network assets.** The MediaPipe WASM and pose model load from a CDN by default; run `npm run vendor:models` and set `NEXT_PUBLIC_SELF_HOST_ONLY=1` to self-host.
+* **Network assets.** The MediaPipe WASM and both pose models are self-hosted by default (installed by `npm install`, hash-checked). The CDN is only a fallback when they are missing; set `NEXT_PUBLIC_SELF_HOST_ONLY=1` to forbid it.
 * **Swing and spin from one camera** are approximate (see 4.14). Bat speed is an estimate.
 * **Uploaded clips** (`/analyse`) are estimates, not radar-validated (see `docs/VALIDATION.md`). Highlight reels are split at camera cuts (**Find camera shots**); TV footage that zooms or pans is compensated within the calibrated shot; **Batting only** mode measures swings from any angle without pitch marks (tap the batter in wide shots). Figures the footage cannot support are refused or marked "not measured", never guessed.
 * **Security trade-offs** (in-memory rate limit per instance) are listed in SECURITY.md; scripts use a per-request CSP nonce.

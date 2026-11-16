@@ -1,6 +1,6 @@
 import type { CameraModel, Pt } from "@/lib/types";
 import { pixelToGround, pitchCorridor, pointInPolygon } from "@/lib/physics/homography";
-import { liftBodyScaled, liftToWorld, mainSubject, type Skeleton } from "./skeleton";
+import { SubjectFollower, liftBodyScaled, liftToWorld, type Skeleton } from "./skeleton";
 import { PITCH_LENGTH } from "@/lib/physics/constants";
 
 export interface PoseOptions {
@@ -9,6 +9,9 @@ export interface PoseOptions {
   wasmBase?: string;
   delegate?: "GPU" | "CPU";
   numPoses?: number;
+  /** "full" is more accurate and slower: right for uploaded clips, where every frame is analysed offline. "lite" keeps the live
+   *  camera real-time. Falls back to the other self-hosted model, then the CDN. */
+  model?: "lite" | "full";
   /** batting-only footage with no pitch calibration: the biggest person is the batter, scaled by this standing height (m) */
   bodyScale?: { statureM: number; imageWidth: number; imageHeight: number; subject?: { x: number; y: number } };
 }
@@ -25,7 +28,7 @@ export class PoseTracker {
   private lm: import("@mediapipe/tasks-vision").PoseLandmarker | null = null;
   private corridor: Pt[] = [];
   private lastTs = -1;
-  private subject: { x: number; y: number } | null = null;
+  private follower: SubjectFollower | null = null;
 
   constructor(private cam: CameraModel | null, private opts: PoseOptions = {}) { if (cam) this.corridor = pitchCorridor(cam, 1.2, 4); }
   setCamera(cam: CameraModel) { this.cam = cam; this.corridor = pitchCorridor(cam, 1.2, 4); }
@@ -34,9 +37,11 @@ export class PoseTracker {
   private async resolveAssets(): Promise<{ wasm: string; model: string }> {
     const has = async (u: string) => { try { return (await fetch(u, { method: "HEAD" })).ok; } catch { return false; } };
     const wasm = this.opts.wasmBase ?? ((await has("/mediapipe/wasm/vision_wasm_internal.wasm")) ? "/mediapipe/wasm" : null);
-    const model = this.opts.modelUrl ?? ((await has("/models/pose_landmarker_lite.task")) ? "/models/pose_landmarker_lite.task" : null);
+    const pref = this.opts.model ?? "lite", order = pref === "full" ? ["full", "lite"] : ["lite", "full"];
+    let model: string | null = this.opts.modelUrl ?? null;
+    for (const m of order) { if (model) break; if (await has(`/models/pose_landmarker_${m}.task`)) model = `/models/pose_landmarker_${m}.task`; }
     if ((!wasm || !model) && process.env.NEXT_PUBLIC_SELF_HOST_ONLY === "1") throw new Error("Self-host-only mode: run `npm run vendor:models` to install the pose model locally.");
-    return { wasm: wasm ?? DEFAULTS.wasmBase, model: model ?? DEFAULTS.modelUrl };
+    return { wasm: wasm ?? DEFAULTS.wasmBase, model: model ?? (pref === "full" ? DEFAULTS.modelUrl.replace(/lite/g, "full") : DEFAULTS.modelUrl) };
   }
 
   async init() {
@@ -50,6 +55,8 @@ export class PoseTracker {
     });
   }
 
+  get ready() { return !!this.lm; }
+
   /** `tSec` is the frame timestamp in seconds; the returned skeletons carry the same `t`. */
   detect(video: HTMLVideoElement | ImageBitmap | HTMLCanvasElement, tSec: number): PosePair {
     if (!this.lm) return { bowler: null, batter: null, people: 0 };
@@ -58,9 +65,9 @@ export class PoseTracker {
     const res = this.lm.detectForVideo(video as HTMLVideoElement, ms);
     if (!this.cam) {
       const bs = this.opts.bodyScale; if (!bs) return { bowler: null, batter: null, people: 0 };
-      // follow the batter the user tapped (re-anchored every frame); if they are lost, wait for them rather than switch person
-      const i = mainSubject(res.landmarks, bs.imageWidth, bs.imageHeight, this.subject ?? bs.subject ?? null);
-      if (i >= 0 && (this.subject || bs.subject)) { const L = res.landmarks[i]; this.subject = { x: (L[23].x + L[24].x) / 2, y: (L[23].y + L[24].y) / 2 }; }
+      // follow one person through the clip: the batter the user tapped, else the biggest person, then whoever stays nearest
+      this.follower ??= new SubjectFollower(bs.subject ?? null);
+      const i = this.follower.pick(res.landmarks, bs.imageWidth, bs.imageHeight);
       const sk = i < 0 ? null : liftBodyScaled(res.landmarks[i], res.worldLandmarks[i], tSec, bs.imageWidth, bs.imageHeight, bs.statureM);
       return { bowler: null, batter: sk, people: res.landmarks.length };
     }
@@ -86,5 +93,23 @@ export class PoseTracker {
     return { bowler: null, batter: null, people: 0 };
   }
 
+  /** a camera cut: the person followed so far may not be in the new shot; re-acquire (a tapped batter stays the target) */
+  newShot() { this.follower = null; }
+
   close() { this.lm?.close(); this.lm = null; }
+}
+
+/** Start body tracking without ever hanging the caller: GPU first, then CPU, each bounded by `timeoutMs`
+ *  (some GPU drivers and software renderers never resolve WebGL init). An init that finishes after its
+ *  timeout is closed so it does not leak a second model. Resolves null when neither delegate starts. */
+export async function startPose(cam: CameraModel | null, opts: PoseOptions = {}, timeoutMs = 20000): Promise<{ pose: PoseTracker; delegate: "GPU" | "CPU" } | null> {
+  for (const delegate of ["GPU", "CPU"] as const) {
+    const p = new PoseTracker(cam, { ...opts, delegate });
+    let timedOut = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const init = p.init().then(() => { if (timedOut) p.close(); return true; }, () => false);
+    const ok = await Promise.race([init, new Promise<boolean>((r) => { timer = setTimeout(() => { timedOut = true; r(false); }, timeoutMs); })]);
+    clearTimeout(timer);
+    if (ok) return { pose: p, delegate };
+  }
+  return null;
 }

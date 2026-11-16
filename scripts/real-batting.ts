@@ -6,16 +6,22 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { analyseClip, type ClipSource } from "../lib/upload/analyse";
-import { liftBodyScaled } from "../lib/cv/skeleton";
+import { SubjectFollower, liftBodyScaled } from "../lib/cv/skeleton";
 import type { SessionConfig } from "../lib/types";
 const [video, fpsA, statA, hand, ...poseFiles] = process.argv.slice(2);
 const fps = +fpsA, stature = +statA, GW = 160, GH = 90;
 const frames = new Map<number, { lm: number[][] | null; wl: number[][] | null }>(); let W = 640, H = 360;
-for (const f of poseFiles) { const d = JSON.parse(readFileSync(f, "utf8")); W = d.w; H = d.h; for (const fr of d.frames) frames.set(fr.k, fr); }
+// two formats: legacy single-person {k, lm, wl} or the app's Tasks model {k, people: [{lm, wl}]} (main subject chosen the app's way)
+const follow = new SubjectFollower();
+for (const f of poseFiles) { const d = JSON.parse(readFileSync(f, "utf8")); W = d.w; H = d.h; for (const fr of d.frames) {
+  if (fr.people) { const ppl = fr.people as { lm: number[][]; wl: number[][] }[]; const i = follow.pick(ppl.map((q) => q.lm.map((l) => ({ x: l[0], y: l[1] }))), W, H); frames.set(fr.k, i < 0 ? { lm: null, wl: null } : ppl[i]); }
+  else frames.set(fr.k, fr);
+} }
+const K0 = Math.min(...frames.keys()), K1 = Math.max(...frames.keys()) + 1;
 const raw = spawnSync("ffmpeg", ["-v", "error", "-i", video, "-vf", `scale=${GW}:${GH},format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1 << 30 }).stdout;
-const n = Math.floor(raw.length / (GW * GH));
-const src: ClipSource = { width: W, height: H, analysisWidth: GW, fps, frameCount: n, frame: async (k, o) => {
-  const t = k / fps, p = frames.get(k);
+const nAll = Math.floor(raw.length / (GW * GH)), n = Math.min(nAll, K1) - K0;
+const src: ClipSource = { width: W, height: H, analysisWidth: GW, fps, frameCount: n, frame: async (kk, o) => {
+  const k = kk + K0, t = k / fps, p = frames.get(k);
   const sk = o.pose && p?.lm && p.wl ? liftBodyScaled(p.lm.map((l) => ({ x: l[0], y: l[1] })), p.wl.map((l) => ({ x: l[0], y: l[1], z: l[2] })), t, W, H, stature) : null;
   return { t, gray: { w: GW, h: GH, data: new Uint8ClampedArray(raw.subarray(k * GW * GH, (k + 1) * GW * GH)) }, pose: o.pose ? { bowler: null, batter: sk, people: sk ? 1 : 0 } : undefined };
 } };
@@ -26,7 +32,7 @@ const cfg: SessionConfig = { mode: "Batting Focus", handedness: hand as "RHB", b
   console.log("frames", n, "shots", r.shots.length, "swings", r.balls.length);
   for (const b of r.balls) {
     const x = b.batting!, q = b.quality!;
-    console.log(`#${b.index} t=${times[b.index - 1]?.toFixed(2)}s bat ${x.unmeasured?.includes("batSpeed") ? "n/m" : x.batSpeedKph.toFixed(0) + " km/h"} | front ${x.unmeasured?.includes("weight") ? "n/m" : x.frontFootPct.toFixed(0) + "%"} | stride ${x.strideCm.toFixed(0)} cm | head drift ${x.headDriftCm.toFixed(1)} cm | downswing ${x.downswingMs.toFixed(0)} ms | backlift ${x.backliftDeg.toFixed(0)}° | path ${x.swingPathDeg.toFixed(0)}° | pose frames ${q.batterPoseFrames}${x.unmeasured?.includes("batSpeed") && x.downswingMs > 700 ? " SLOW-MO" : ""}`);
+    console.log(`#${b.index} t=${(times[b.index - 1] + K0 / fps)?.toFixed(2)}s bat ${x.unmeasured?.includes("batSpeed") ? "n/m" : x.batSpeedKph.toFixed(0) + " km/h"} | front ${x.unmeasured?.includes("weight") ? "n/m" : x.frontFootPct.toFixed(0) + "%"} | stride ${x.strideCm.toFixed(0)} cm | head drift ${x.headDriftCm.toFixed(1)} cm | downswing ${x.downswingMs.toFixed(0)} ms | backlift ${x.backliftDeg.toFixed(0)}° | path ${x.swingPathDeg.toFixed(0)}° | pose frames ${q.batterPoseFrames}${x.unmeasured?.includes("batSpeed") && x.downswingMs > 700 ? " SLOW-MO" : ""}`);
   }
   console.log(r.warnings.join("\n"));
 })();

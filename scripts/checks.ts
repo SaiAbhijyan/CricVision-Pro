@@ -175,6 +175,35 @@ async function main() {
     ok(Math.abs(lh.biomech.frontFootPct - ex.biomech.frontFootPct) < 12, "left-hander mirrors right-hander weight: " + lh.biomech.frontFootPct.toFixed(0));
   }
 
+  // --- production CSP forbids eval: no client code may evaluate strings; the worklet source must match the class ---
+  {
+    const { readdirSync, readFileSync, statSync } = await import("fs");
+    const { join } = await import("path");
+    const walk = (d: string): string[] => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : /\.tsx?$/.test(f) ? [p] : []; });
+    const offenders = ["lib", "components", "app"].flatMap((d) => walk(join(__dirname, "..", d))).filter((f) => /(^|[^.\w])(new Function\(|eval\()/m.test(readFileSync(f, "utf8").replace(/^\s*(\/\/|\*).*$/gm, "")));
+    ok(offenders.length === 0, `no eval / new Function in client code (found in ${offenders.join(", ")})`);
+    const { ONSET_CORE_SOURCE, createOnsetCore } = await import("../lib/audio/onset-core");
+    // run the worklet's copy in an isolated scope the way the AudioWorklet would (test-only evaluation, never shipped)
+    const viaSource = new Function(`${ONSET_CORE_SOURCE}; return new OnsetCore(48000);`)() as ReturnType<typeof createOnsetCore>;
+    let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) - 0.5;
+    const sig = new Float32Array(96000);
+    for (let i = 0; i < sig.length; i++) sig[i] = 0.004 * rnd() + 0.002 * Math.sin(i * 0.37);
+    for (let i = 24000; i < 24200; i++) sig[i] += 0.5 * Math.exp(-(i - 24000) / 30) * Math.sin(i * 1.9);      // sharp bat click
+    for (let i = 60000; i < 61500; i++) sig[i] += 0.3 * Math.exp(-(i - 60000) / 600) * Math.sin(i * 0.05);   // dull pad thud
+    for (let i = 80000; i < 80150; i++) sig[i] += 0.06 * Math.exp(-(i - 80000) / 25) * Math.sin(i * 2.1);   // quiet edge
+    const viaClass = createOnsetCore(48000), viaWorklet = new Function(`${ONSET_CORE_SOURCE}; return new OnsetCore(48000);`)() as ReturnType<typeof createOnsetCore>;
+    const a: unknown[] = [], b: unknown[] = [];
+    for (let i = 0; i < sig.length; i += 128) { a.push(...viaClass.process(sig.subarray(i, i + 128))); b.push(...viaWorklet.process(sig.subarray(i, i + 128))); }
+    ok(a.length >= 2 && JSON.stringify(a) === JSON.stringify(b), `worklet source and main-thread class give identical onsets (${a.length} vs ${b.length})`);
+  }
+  { // head over the front foot at contact: moving the head 25 cm back moves the figure 25 cm
+    const { generateBatter, defaultBatter } = await import("../lib/sim/synth-pose");
+    const { extractBatting } = await import("../lib/cv/biomech");
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const back = sk.map((f) => ({ t: f.t, j: { ...f.j, nose: { ...f.j.nose, y: f.j.nose.y + 0.25 } } }));
+    const a = extractBatting(sk, { hand: "RHB", impactT: 0.55 })!.biomech.headOverFrontFootCm!, b = extractBatting(back, { hand: "RHB", impactT: 0.55 })!.biomech.headOverFrontFootCm!;
+    near(b - a, 25, 0.5, "head over front foot follows the head");
+  }
   console.log(`checks: ${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);
 }

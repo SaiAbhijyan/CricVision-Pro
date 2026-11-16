@@ -14,16 +14,17 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
   const sw = balls.filter((b) => b.batting?.swingDetected);
   if (!sw.length) return null;
   const bt = sw.map((b) => b.batting!);
-  const bs = bt.filter((b) => batSpeedOk(b) && b.batSpeedKph > 5), ws = bt.filter(weightOk);
+  const bs = bt.filter((b) => batSpeedOk(b) && b.batSpeedKph > 5), ws = bt.filter(weightOk), ps = bt.filter((b) => !b.unmeasured?.includes("path"));
   const na = "not measured";
   const tiles: [string, string, string][] = [
-    ["Bat speed", bs.length ? `${avg(bs.map((b) => b.batSpeedKph)).toFixed(0)} km/h` : na, bs.length ? `peak ${Math.max(...bs.map((b) => b.batSpeedKph)).toFixed(0)}` : "hands moved implausibly fast: check the slow-motion setting"],
-    ["Attack angle", `${avg(bt.map((b) => b.attackAngleDeg)).toFixed(0)}°`, "+ upward through the ball"],
-    ["Swing path", `${avg(bt.map((b) => b.swingPathDeg)).toFixed(0)}°`, "0 = straight, + across to leg"],
+    ["Bat speed", bs.length ? `${avg(bs.map((b) => b.batSpeedKph)).toFixed(0)} km/h` : na, bs.length ? `peak ${Math.max(...bs.map((b) => b.batSpeedKph)).toFixed(0)}` : bt.some((b) => b.downswingMs > 700) ? "looks like slow motion: set the slow-motion factor to measure it" : "hands moved implausibly fast: check the slow-motion setting"],
+    ["Attack angle", ps.length ? `${avg(ps.map((b) => b.attackAngleDeg)).toFixed(0)}°` : na, ps.length ? "+ upward through the ball" : "this camera looks along the stride; film side-on to measure it"],
+    ["Swing path", ps.length ? `${avg(ps.map((b) => b.swingPathDeg)).toFixed(0)}°` : na, ps.length ? "0 = straight, + across to leg" : "this camera looks along the stride; film side-on to measure it"],
     ["Downswing", `${avg(bt.map((b) => b.downswingMs)).toFixed(0)} ms`, `${avg(bt.map((b) => b.swingArcCm)).toFixed(0)} cm arc`],
     ["Weight on front foot", ws.length ? `${avg(ws.map((b) => b.frontFootPct)).toFixed(0)}%` : na, ws.length ? "whole-body centre of gravity, at contact" : "this camera looks along the stride; film side-on to measure it"],
     ["Centre of gravity travel", ws.length ? `${avg(ws.map((b) => b.comShiftCm)).toFixed(0)} cm` : na, "head to toe, toward the bowler"],
     ["Head drift", `${avg(bt.map((b) => Math.abs(b.headDriftCm))).toFixed(1)} cm`, "off the line, average"],
+    (() => { const h = ps.filter((b) => !b.unmeasured?.includes("weight") && typeof b.headOverFrontFootCm === "number").map((b) => b.headOverFrontFootCm!); return ["Head over front foot", h.length ? `${Math.abs(avg(h)).toFixed(0)} cm ${avg(h) > 0 ? "behind" : "ahead of"} it` : "not measured", h.length ? "at contact; over the foot is balanced, behind it falls back" : "needs a side-on view"]; })(),
   ];
   const curves = sw.filter((b) => weightOk(b.batting)).map((b) => b.batting!.weightSeries).filter((a) => a && a.length === 34);
   const wcurve = curves.length ? Array.from({ length: 34 }, (_, k) => ({ ms: Math.round(-450 + (550 * k) / 33), front: avg(curves.map((a) => a[k])), back: 100 - avg(curves.map((a) => a[k])) })) : [];
