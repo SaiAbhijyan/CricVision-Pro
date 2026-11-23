@@ -422,6 +422,30 @@ async function main() {
     const tDet = detectSwings(sk)[0] ?? 0.55;
     ok(Math.abs((rs.balls[0]?.batting?.frontFootPct ?? 0) - extractBattingSync(sk, { hand: "RHB", impactT: tDet })!.biomech.frontFootPct) < 3, `side-on weight matches the reference (${rs.balls[0]?.batting?.frontFootPct?.toFixed(1)} vs ${extractBattingRef(sk).toFixed(1)}; front-on run ${rf.balls[0]?.batting?.frontFootPct?.toFixed(1)})`); }
 
+  { // bat tracking inside the upload path: colour frames around each swing go to the bat detector, metrics come back
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const blank = { w: 64, h: 36, data: new Uint8ClampedArray(64 * 36).fill(100) };
+    const src = (frames: typeof sk) => ({ analysisWidth: 64, width: 1280, height: 720, fps: 30, frameCount: frames.length,
+      frame: async (k: number) => ({ t: frames[k].t, gray: blank, pose: { bowler: null, batter: { ...frames[k], hn: { x: 0.5, y: 0.4 } }, people: 1 } }),
+      image: async (k: number) => ({ img: {} as CanvasImageSource, w: 1280, h: 720, t: frames[k].t }) });
+    const w = (1500 * Math.PI) / 180, calls: (number | null)[] = [];
+    const spin = { detect: async (_i: CanvasImageSource, _W: number, _H: number, t: number, hands: { x: number; y: number } | null) => {
+      calls.push(hands ? hands.x : null);
+      const a = w * (t - 0.55), L = 220, h = hands ?? { x: 640, y: 288 };
+      return { t, handle: h, toe: { x: h.x + L * Math.sin(a), y: h.y + L * Math.cos(a) }, conf: 0.9, lenPx: L };
+    } };
+    const r = await analyseClip(src(sk) as never, { cfg, cal: null, impacts: [], bat: spin });
+    const b = r.balls[0]?.batting?.bat;
+    ok(!!b && calls.length >= 10 && calls.every((x) => x === 640), `bat detector runs on the frames around the swing with the hands in pixels (${calls.length} calls)`);
+    ok(!!b && Math.abs((b.toeSpeedKph ?? 0) - w * 0.85 * 3.6) < 3, `toe speed comes through the upload path (${b?.toeSpeedKph} km/h)`);
+    const none = await analyseClip(src(sk) as never, { cfg, cal: null, impacts: [], bat: { detect: async () => null } });
+    // slow-motion replay: angles kept, speeds dropped (a synthetic swing slowed enough to exceed 0.7 s no longer reads as a swing,
+    // so the rule is checked directly)
+    const { batForSwing } = await import("../lib/upload/analyse");
+    const real = batForSwing(b!, 400)!, slowMo = batForSwing(b!, 1067)!;
+    ok(real.toeSpeedKph === b!.toeSpeedKph && slowMo.toeSpeedKph === undefined && slowMo.peakAngularDegS === undefined && slowMo.batAngleAtContactDeg === b!.batAngleAtContactDeg, "slow motion: bat angles kept, speeds dropped");
+    ok(none.balls.length === 1 && !none.balls[0].batting?.bat && none.balls[0].quality!.warnings.some((x) => /bat was not seen/.test(x)), "bat never seen: no bat numbers, and the swing says why");
+  }
   console.log(`upload checks: ${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

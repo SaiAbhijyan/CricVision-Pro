@@ -1,0 +1,41 @@
+{
+ "_source": "IPL 2008-2024 ball-by-ball, 295,732 deliveries (github.com/ritesh-ojha/IPL-DATASET, MIT; data originally from Cricsheet, cricsheet.org, ODC-By 1.0). Computed by scripts/datasets/ipl_rates.py. Percentages are of balls faced (wides excluded); wide/no-ball rates are of all deliveries; wickets exclude run outs.",
+ "phases": {
+  "powerplay": {
+   "deliveries": 92904,
+   "runRatePerOver": 7.82,
+   "dotPct": 42.1,
+   "onePct": 26.8,
+   "twoPct": 4.3,
+   "fourPct": 16.1,
+   "sixPct": 4.2,
+   "wicketPct": 3.79,
+   "widePct": 3.46,
+   "noballPct": 0.39
+  },
+  "middle": {
+   "deliveries": 135655,
+   "runRatePerOver": 7.74,
+   "dotPct": 27.4,
+   "onePct": 45.6,
+   "twoPct": 6.7,
+   "fourPct": 9.3,
+   "sixPct": 4.9,
+   "wicketPct": 4.04,
+   "widePct": 2.77,
+   "noballPct": 0.26
+  },
+  "death": {
+   "deliveries": 67173,
+   "runRatePerOver": 9.75,
+   "dotPct": 20.4,
+   "onePct": 39.4,
+   "twoPct": 8.9,
+   "fourPct": 12.0,
+   "sixPct": 8.6,
+   "wicketPct": 7.34,
+   "widePct": 4.31,
+   "noballPct": 0.72
+  }
+ }
+}

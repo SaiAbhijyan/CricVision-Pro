@@ -20,8 +20,18 @@ export default function BatSwing({ balls }: { balls: BallRecord[] }) {
     ["Bat speed", bs.length ? `${avg(bs.map((b) => b.batSpeedKph)).toFixed(0)} km/h` : na, bs.length ? `peak ${Math.max(...bs.map((b) => b.batSpeedKph)).toFixed(0)}` : bt.some((b) => b.downswingMs > 700) ? "looks like slow motion: set the slow-motion factor to measure it" : "hands moved implausibly fast: check the slow-motion setting"],
     ["Attack angle", ps.length ? `${avg(ps.map((b) => b.attackAngleDeg)).toFixed(0)}°` : na, ps.length ? "+ upward through the ball" : "this camera looks along the stride; film side-on to measure it"],
     ["Swing path", ps.length ? `${avg(ps.map((b) => b.swingPathDeg)).toFixed(0)}°` : na, ps.length ? "0 = straight, + across to leg" : "this camera looks along the stride; film side-on to measure it"],
+    ...(() => {
+      const bb = bt.filter((b) => b.bat).map((b) => b.bat!);
+      if (!bb.length) return [] as [string, string, string][];   // not attempted (simulator, live) or not seen: each swing says which
+      return [
+        ["Bat angle at contact", `${avg(bb.map((b) => b.batAngleAtContactDeg)).toFixed(0)}°`, "from vertical, in the picture: low = straight bat, high = cross-batted"],
+        ["Bat lift", `${avg(bb.map((b) => b.batLiftDeg)).toFixed(0)}°`, "how high the toe rose above the handle before the downswing"],
+        (() => { const sp = bb.filter((b) => typeof b.toeSpeedKph === "number").map((b) => b.toeSpeedKph!); return ["Bat toe speed", sp.length ? `${avg(sp).toFixed(0)} km/h` : na, sp.length ? `tracked bat, scaled by its length (${sp.length} swing${sp.length > 1 ? "s" : ""}); an estimate, best side-on` : "slow-motion replay: angles only"] as [string, string, string]; })(),
+      ] as [string, string, string][];
+    })(),
     ["Downswing", `${avg(bt.map((b) => b.downswingMs)).toFixed(0)} ms`, `${avg(bt.map((b) => b.swingArcCm)).toFixed(0)} cm arc`],
     ["Weight on front foot", ws.length ? `${avg(ws.map((b) => b.frontFootPct)).toFixed(0)}%` : na, ws.length ? "whole-body centre of gravity, at contact" : "this camera looks along the stride; film side-on to measure it"],
+    (() => { const p = ws.filter((b) => typeof b.frontFootPressurePct === "number").map((b) => b.frontFootPressurePct!); return ["Pressure on front foot", p.length ? `${avg(p).toFixed(0)}%` : na, p.length ? "dynamic: where the feet push at contact (braking puts it ahead of the weight)" : "needs a side-on view and 25+ fps"]; })(),
     ["Centre of gravity travel", ws.length ? `${avg(ws.map((b) => b.comShiftCm)).toFixed(0)} cm` : na, "head to toe, toward the bowler"],
     ["Head drift", `${avg(bt.map((b) => Math.abs(b.headDriftCm))).toFixed(1)} cm`, "off the line, average"],
     (() => { const h = ps.filter((b) => !b.unmeasured?.includes("weight") && typeof b.headOverFrontFootCm === "number").map((b) => b.headOverFrontFootCm!); return ["Head over front foot", h.length ? `${Math.abs(avg(h)).toFixed(0)} cm ${avg(h) > 0 ? "behind" : "ahead of"} it` : "not measured", h.length ? "at contact; over the foot is balanced, behind it falls back" : "needs a side-on view"]; })(),

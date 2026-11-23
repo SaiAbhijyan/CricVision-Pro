@@ -38,6 +38,9 @@ The motion-triggered high-fps clip and the "Vy flips sign" bounce rule are reaso
 
 ## Body tracking
 
+Round 2 added the **dynamic centre of pressure** (zero-moment point: CoM − z/(g + z̈)·CoM̈) as "Pressure on front foot" next to the static weight: it is exact on synthetic physics (constant velocity equals static, braking shifts it by z·a/g) and refuses frames where the pose is too noisy for a second derivative (reported with 0.3 cm pose noise, refused at 1 cm and above).
+
+
 | Technique | CricVision Pro before | What changed | Result | Gap left |
 |---|---|---|---|---|
 | **33-keypoint pose** (MediaPipe / RTMPose / HRNet) | MediaPipe Pose (lite) from a CDN | Self-hosted, SHA-pinned lite (live) and full (uploads) models; `startPose` tries GPU then CPU with timeouts; one person followed through a clip; MediaPipe left/right swaps fixed from the stance | Live session no longer stuck on "Loading pose model…" when the GPU never answers; 13 L/R swaps corrected on the Kohli reel | No RTMPose/HRNet option. |
@@ -51,7 +54,7 @@ The motion-triggered high-fps clip and the "Vy flips sign" bounce rule are reaso
 
 | Technique | CricVision Pro before | What changed | Result | Gap left |
 |---|---|---|---|---|
-| **Bat keypoints (handle top, toe)** | bat inferred from the hands' path and wrist snap; bat speed labelled an estimate | unchanged | | **No bat model.** Needs a trained keypoint model (the LearnOpenCV pipeline uses YOLO pose for handle and tip). |
+| **Bat keypoints (handle top, toe)** | bat inferred from the hands' path and wrist snap; bat speed labelled an estimate | **Built (round 2):** YOLOv8n-OBB trained here on an MIT set of 882 oriented bat boxes; the box's long axis is the bat, the end nearer the hands is the handle; runs in the browser (ONNX Runtime, self-hosted) on the frames around each swing; bat angle at contact, bat lift, angular speed, toe speed (`models/README.md`) | held-out: ends within 3.2% of bat length (median), angle 1.3°; unseen broadcast: found in 12/20 frames, always on the bat; tracked a real swing in Chrome (straight bat, 1.3°) | 2-D only (no depth model, so no 3-D swing plane); live mode does not run it yet; calibrated (ball + bat) uploads do not run it yet |
 | **Audio impact sync** (2-5 kHz transient) | AudioWorklet onset detector, 2-5 kHz band, sharp vs dull classification, mapped onto video time | **The production CSP blocked it**: the fallback core and uploads ran the detector through `new Function`, which the CSP rightly forbids, so `new ImpactDetector()` threw and live mode never started. Now a real class; the worklet keeps its own copy; a check proves both give identical events and fails the build if any client code evaluates strings | Live session starts under the production CSP, 0 errors | Not tested against a real bat at a net. |
 | **Exit-vector projection** | exit direction and speed from post-impact motion, projected onto the field | unchanged | | Monocular approximation (see README §4.6). |
 
@@ -66,7 +69,7 @@ The motion-triggered high-fps clip and the "Vy flips sign" bounce rule are reaso
 
 * **Ahead of the vendor claims on honesty:** every figure carries an uncertainty and is refused when unsupported. Fulltrack's published bias is +2.6-2.8 km/h on pace with no per-ball error bar.
 * **On par in method:** stump/pitch-anchored calibration, physics-fitted 3D flight, bounce detection, swing vs seam, 33-point pose metrics, audio contact.
-* **Behind:** no learned ball detector, no bat keypoint model, no stumps-only calibration, no high-fps native capture, and **no real-world validation yet**. The single most useful next step is the same as before: film real deliveries with a radar gun alongside, at 1.3 m and 2.2 m camera heights.
+* **Behind:** no learned ball detector (no licensed, varied cricket-ball footage reachable: see `docs/DATASETS.md`), no stumps-only calibration, no high-fps native capture, and **no real-world validation yet**. Round 2 closed the bat-tracking gap (2-D) and calibrated the match simulator against 295,732 real IPL deliveries. The single most useful next step is the same as before: film real deliveries with a radar gun alongside, at 1.3 m and 2.2 m camera heights.
 
 ## Tests behind these results
 

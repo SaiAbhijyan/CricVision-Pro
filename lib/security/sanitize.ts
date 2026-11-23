@@ -73,11 +73,12 @@ function batting(x: unknown): BattingBiomech | null {
   if (!isObj(x)) return null;
   const n = (k: string, lo: number, hi: number) => numD(x[k], lo, hi);
   return {
-    frontFootPct: n("frontFootPct", 0, 100), strideCm: n("strideCm", 0, 300), triggerMs: n("triggerMs", 0, 3000), headDriftCm: n("headDriftCm", -100, 100), ...(typeof x.headOverFrontFootCm === "number" ? { headOverFrontFootCm: n("headOverFrontFootCm", -150, 150) } : {}),
+    frontFootPct: n("frontFootPct", 0, 100), strideCm: n("strideCm", 0, 300), triggerMs: n("triggerMs", 0, 3000), headDriftCm: n("headDriftCm", -100, 100), ...(typeof x.headOverFrontFootCm === "number" ? { headOverFrontFootCm: n("headOverFrontFootCm", -150, 150) } : {}), ...(typeof x.frontFootPressurePct === "number" ? { frontFootPressurePct: n("frontFootPressurePct", 0, 100) } : {}),
     backliftDeg: n("backliftDeg", 0, 180), frontElbowDeg: n("frontElbowDeg", -90, 180), bottomHandPct: n("bottomHandPct", 0, 100),
     wristSnapDegS: n("wristSnapDegS", 0, 5000), swingPlaneDeg: n("swingPlaneDeg", -90, 90), swingDetected: x.swingDetected === true,
     batSpeedKph: n("batSpeedKph", 0, 170), attackAngleDeg: n("attackAngleDeg", -60, 60), swingPathDeg: n("swingPathDeg", -90, 90),
     downswingMs: n("downswingMs", 0, 1500), swingArcCm: n("swingArcCm", 0, 400),
+    ...(isObj(x.bat) ? { bat: { batAngleAtContactDeg: numD(x.bat.batAngleAtContactDeg, 0, 90), batLiftDeg: numD(x.bat.batLiftDeg, -90, 90), ...(typeof x.bat.peakAngularDegS === "number" ? { peakAngularDegS: numD(x.bat.peakAngularDegS, 0, 5000) } : {}), ...(typeof x.bat.toeSpeedKph === "number" ? { toeSpeedKph: numD(x.bat.toeSpeedKph, 0, 250) } : {}), coverage: numD(x.bat.coverage, 0, 1), frames: numD(x.bat.frames, 0, 500) } } : {}),
     weightShiftCm: n("weightShiftCm", 0, 300), hipPeakMs: n("hipPeakMs", -1500, 500), handPeakMs: n("handPeakMs", -1500, 500), chainOrdered: x.chainOrdered === true,
     comShiftCm: n("comShiftCm", -100, 300),
     weightSeries: Array.isArray(x.weightSeries) ? x.weightSeries.slice(0, 34).map((v) => numD(v, 0, 100)) : [],

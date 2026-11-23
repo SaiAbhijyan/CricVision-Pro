@@ -69,6 +69,7 @@ export class PoseTracker {
       this.follower ??= new SubjectFollower(bs.subject ?? null);
       const i = this.follower.pick(res.landmarks, bs.imageWidth, bs.imageHeight);
       const sk = i < 0 ? null : liftBodyScaled(res.landmarks[i], res.worldLandmarks[i], tSec, bs.imageWidth, bs.imageHeight, bs.statureM);
+      if (sk) sk.hn = handsOf(res.landmarks[i]);
       return { bowler: null, batter: sk, people: res.landmarks.length };
     }
     const W = this.cam.imageWidth, H = this.cam.imageHeight;
@@ -81,6 +82,7 @@ export class PoseTracker {
       const g = pixelToGround(this.cam, foot);
       if (g.y < -4 || g.y > PITCH_LENGTH + 4) continue;
       const sk = liftToWorld(this.cam, lmk, wld, tSec);
+      if (sk) sk.hn = handsOf(lmk);
       if (sk) cands.push({ sk, y: g.y });
     }
     cands.sort((a, b) => a.y - b.y);
@@ -113,3 +115,6 @@ export async function startPose(cam: CameraModel | null, opts: PoseOptions = {},
   }
   return null;
 }
+
+/** Wrist midpoint in normalised image coordinates (MediaPipe 15, 16). */
+const handsOf = (l: { x: number; y: number }[]) => ({ x: (l[15].x + l[16].x) / 2, y: (l[15].y + l[16].y) / 2 });

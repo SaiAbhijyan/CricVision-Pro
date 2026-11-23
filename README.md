@@ -72,6 +72,8 @@ npm run dev                    # http://localhost:3000
 | `npm run build && npm start` | production build and server |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | `tsx scripts/selfcheck.ts`: physics, rules, simulator, audio onset, ring buffer, offline report |
+| `npm run calibrate` | match simulator vs 295,732 real IPL deliveries; fails if it leaves realistic bands |
+| `bash scripts/datasets/fetch.sh` | clone the catalogued cricket/sports datasets (`docs/DATASETS.md`) |
 
 **No API key?** Everything still works. The coach falls back to built-in offline rules (the UI shows "Offline rules").
 
@@ -415,6 +417,22 @@ Per shot: bat speed (estimated from hand speed), attack angle, swing path, downs
 *Files: `lib/cv/com.ts`, `components/WeightView.ts`, `components/ReplayCanvas.tsx`*
 
 Weight transfer is the whole-body centre of mass, not a foot-pressure guess. The 19 skeleton joints are grouped into 14 segments with de Leva mass fractions (head 6.9%, trunk 43.5%, arms about 9.9%, thighs about 28.3%, shanks 8.7%, feet 2.7%). The mass-weighted centre is projected onto the line between the back-foot and front-foot ground contacts, along the pitch: 0% is all back, 100% is all front. The report charts that share from 450 ms before contact to 100 ms after, plus the centre's travel in cm toward the bowler. In the replay, **Scan body** sweeps a line from head to toe, filling each segment's mass, and **Centre of gravity** shows a side view with the plumb line and base of support. These are estimates from one camera's skeleton, not force-plate or motion-capture measurements.
+
+### 4.12b Bat tracking
+
+*Files: `lib/cv/bat.ts`, `models/bat_obb.onnx`, `models/README.md`*
+
+The bat is tracked as a two-point skeleton, handle and toe. A YOLOv8n-OBB model (trained here on an MIT set of 882 cricket frames with oriented bat boxes) finds the bat; the long axis of its box is the bat and the end nearer the batter's hands is the handle. It runs in the browser through a self-hosted ONNX Runtime, only on the frames from 0.6 s before contact to 0.12 s after, and gives the bat angle at contact (straight vs cross bat), how high the toe rose in the backlift, the bat's angular speed and the toe speed scaled by the bat's own length. On held-out frames the bat ends land within a median 3.2% of the bat's length; on unseen broadcast footage the bat is found in about 60% of frames (it misses edge-on bats). A swing whose bat was seen in under 40% of those frames shows no bat numbers and says why; slow-motion replays keep the angles and drop the speeds. Batting-only uploads use it today.
+
+### 4.12c Pressure on the front foot
+
+*File: `lib/cv/com.ts` (`pressureSeries`)*
+
+Next to the static weight split, the dynamic centre of pressure (zero-moment point, CoP = CoM − z / (g + z̈) · CoM̈) says where the feet push: braking onto the front foot puts it ahead of the weight. Acceleration comes from a local quadratic fit with its own standard error, and a frame is refused when that error would move the split by more than 10 points, which in practice means it appears for clean, high-frame-rate footage.
+
+### 4.12d Simulator calibrated against real cricket
+
+`npm run calibrate` runs the match simulator and compares it with 295,732 IPL deliveries (`data/ipl-phase-rates.json`, from Cricsheet). Before calibration a powerplay ran at 16 an over with 1.7% singles and a no-ball every 11 balls; now 9.0 an over (IPL 7.82), 28.6% singles (26.8%), 20% fours (16.1%), 3.8% wickets (3.79%), 1.1% no-balls (0.39%), and batters can be bowled through the gap between bat and pad. Details and remaining gaps: `docs/DATASETS.md`.
 
 ### 4.13 Player DNA
 

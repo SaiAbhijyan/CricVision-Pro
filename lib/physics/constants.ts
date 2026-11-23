@@ -39,9 +39,9 @@ export const SURFACES: Record<PitchSurface, SurfaceSpec> = {
 
 /** Outfield rolling deceleration (m/s^2) and bounce COR */
 export const OUTFIELD: Record<OutfieldSpeed, { decel: number; cor: number }> = {
-  Slow: { decel: 1.9, cor: 0.50 },
-  Medium: { decel: 1.2, cor: 0.55 },
-  Lightning: { decel: 0.7, cor: 0.60 },
+  Slow: { decel: 2.6, cor: 0.50 },
+  Medium: { decel: 1.8, cor: 0.55 },
+  Lightning: { decel: 1.2, cor: 0.60 },
 };
 
 export const KPH = 3.6;

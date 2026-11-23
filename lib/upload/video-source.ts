@@ -53,6 +53,13 @@ export class VideoClipSource implements ClipSource {
 
   newShot() { this.o.pose?.newShot(); }
 
+  /** Full-colour frame k: the video element itself, seeked there (callers draw it straight away). */
+  async image(k: number) {
+    const v = this.o.video;
+    await seekTo(v, frameSeekTime(k, this.o.mediaFps));
+    return { img: v as CanvasImageSource, w: v.videoWidth, h: v.videoHeight, t: frameClipTime(k, this.o.mediaFps, this.o.timeScale) };
+  }
+
   async frame(k: number, opt: { pose: boolean; poseCam?: CameraModel }): Promise<ClipFrame> {
     const v = this.o.video;
     await seekTo(v, frameSeekTime(k, this.o.mediaFps));

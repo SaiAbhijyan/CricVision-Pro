@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import type { Calibration, ClipMeta, SessionConfig } from "@/lib/types";
 import { buildCameraModel } from "@/lib/physics/homography";
 import { PoseTracker, startPose } from "@/lib/cv/pose";
+import { BatDetector } from "@/lib/cv/bat";
 import { FrameRing } from "@/lib/cv/frame-ring";
 import { fitInWorker } from "@/lib/live/fit-client";
 import { buildLiveClip } from "@/lib/live/clip";
@@ -123,6 +124,14 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
       if (!pose && swingMode) throw new Error("Body tracking could not start in this browser, and batting-only analysis needs it. Try Chrome or Edge.");
       if (!pose) notes.push("Body tracking could not start in this browser, so only the ball flight was analysed.");
       const src = new VideoClipSource({ video: v, mediaFps, timeScale: slow, pose, ring });
+      // bat tracking (two-point bat skeleton) runs only on the frames around each swing; a missing model or runtime just skips it
+      const batDet = swingMode ? new BatDetector() : null;
+      let batOk = true;
+      const bat = batDet ? { detect: async (img: CanvasImageSource, W: number, H: number, t: number, hands: { x: number; y: number } | null) => {
+        if (!batOk) return null;
+        try { return await batDet.detect(img, W, H, t, hands); }
+        catch { batOk = false; notes.push("Bat tracking could not start in this browser, so bat angle and toe speed are not measured."); return null; }
+      } } : undefined;
       const clips: { meta: ClipMeta; frames: Blob[] }[] = [];
       const res = await analyseClip(src, {
         cfg: swingMode && cfg.mode === "Bowling Focus" ? { ...cfg, mode: "Batting Focus" } : cfg, cal: oriented, impacts, signal: abort.current,
@@ -133,6 +142,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
         manualContact: contactMode === "manual" && manual ? { t: clipTime(manual.mediaT, slow), kind: manual.kind } : null,
         poseStride: Math.max(1, Math.round(eff / (swingMode ? 30 : 15))),   // swings need the full 30 Hz to time the downswing
         fit: (c, obs, s) => fitInWorker(c, obs, s, 60000),
+        bat,
         onProgress: (k, n, note) => setProgress({ k, n, note }),
         onDelivery: async (d) => {
           if (!cam) return;   // batting-only: no camera model to draw the replay overlay
@@ -140,6 +150,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
           if (c) clips.push(c);
         },
       });
+      batDet?.close();
       if (abort.current.aborted) { setPhase("setup"); return; }
       setDiags(res.diagnostics); setMessages([...notes, ...res.warnings]);
       if (!res.balls.length) { setPhase("done"); return; }

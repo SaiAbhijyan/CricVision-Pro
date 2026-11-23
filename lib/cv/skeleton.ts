@@ -8,7 +8,7 @@ export const JOINTS = [
 ] as const;
 export type JointName = (typeof JOINTS)[number];
 export type Joints = Record<JointName, Vec3>;
-export interface Skeleton { t: number; j: Joints }
+export interface Skeleton { t: number; j: Joints; /** midpoint of the wrists in the image, normalised 0..1 (for bat tracking) */ hn?: { x: number; y: number } }
 
 export const MP_INDEX: Record<JointName, number> = {
   nose: 0, lSh: 11, rSh: 12, lEl: 13, rEl: 14, lWr: 15, rWr: 16, lIdx: 19, rIdx: 20,

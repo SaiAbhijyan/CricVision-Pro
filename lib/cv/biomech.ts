@@ -1,4 +1,4 @@
-import { centreOfMass, weightState } from "./com";
+import { centreOfMass, pressureSeries, weightState } from "./com";
 import type { BattingBiomech, BowlerArm, BowlingBiomech, Handedness } from "@/lib/types";
 import { BOWLER_CREASE_Y, RETURN_CREASE_HALF, clamp, deg, wrap180 } from "@/lib/physics/constants";
 import {
@@ -160,6 +160,8 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   // Frames are mirrored for left-handers, so the batter always faces with the left foot forward here.
   const wAt = (i: number) => weightState(fr[i].j, "RHB");
   const rawFront = wAt(imp).frontPct;
+  // where the feet push (dynamic centre of pressure), as opposed to where the weight is (static CoM)
+  const press = pressureSeries(fr.slice(Math.max(0, imp - 12), Math.min(n, imp + 13)), "RHB")[Math.min(12, imp)];   // frames are mirrored to RHB above
   const frontPct = clamp(rawFront, 0, 100);
   // weight split stability: the median frame-to-frame change over the last 450 ms. A real weight transfer is smooth; a split
   // that jumps tens of points between neighbouring frames is depth noise from a view that looks along the stride.
@@ -262,7 +264,7 @@ export function extractBatting(frames: Skeleton[], opts: { hand: Handedness; imp
   return {
     impactIdx: imp, stanceIdx: st, backliftIdx: bl,
     biomech: {
-      frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, headOverFrontFootCm: +((fr[imp].j.nose.y - fr[imp].j.lAnk.y) * 100).toFixed(1), backliftDeg: backlift,
+      frontFootPct: frontPct, strideCm: stride, triggerMs, headDriftCm: drift * 100, headOverFrontFootCm: +((fr[imp].j.nose.y - fr[imp].j.lAnk.y) * 100).toFixed(1), ...(press !== null && press !== undefined ? { frontFootPressurePct: Math.round(clamp(press, 0, 100) * 10) / 10 } : {}), backliftDeg: backlift,
       frontElbowDeg: elbowElev, bottomHandPct: bottomPct, wristSnapDegS: snap, swingPlaneDeg: plane, swingDetected: swing,
       batSpeedKph, attackAngleDeg: attack, swingPathDeg: path, downswingMs: downMs, swingArcCm: arc * 100,
       weightShiftCm: shiftCm, comShiftCm, weightSeries, hipPeakMs: hipPeak, handPeakMs: handPeak, chainOrdered,

@@ -11,10 +11,10 @@ export const FIELDER = {
   catchReach: 1.15,   // m horizontal catching reach (stretch / dive)
   catchMaxZ: 2.4,     // m
   catchMinZ: 0.12,    // m
-  pickupReach: 0.95,  // m
-  gather: 0.45,       // s to gather and release
-  throwSpeed: 27,     // m/s
-  keeperTake: 0.25,
+  pickupReach: 1.5,   // m: ground-ball reach including a dive
+  gather: 0.65,       // s to gather, set and release (on the move, not standing)
+  throwSpeed: 25,     // m/s flat throw to the stumps
+  keeperTake: 0.5,    // s for the keeper/bowler to take it and break the stumps (direct hits are the exception)
   circle30: 27.43,    // 30 yards
 };
 
@@ -27,7 +27,7 @@ export function reachTime(d: number): number {
 }
 
 /** Cumulative time for the batters to complete n runs from a standing start (crease-to-crease 17.68 m). */
-export const runTime = (n: number) => 0.35 + 2.85 + 2.45 * (n - 1);
+export const runTime = (n: number) => 3.0 + 2.9 * (n - 1);   // a quick single ~3.0 s from contact; each extra run ~2.9 s incl. the turn
 
 /* ----------------------------------- presets ----------------------------------- */
 
@@ -104,7 +104,9 @@ export interface FieldResolution {
 
 const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
-export function resolveFielding(shot: ShotResult, fielders: FieldPlayer[], opts: { allowCatch: boolean; outfield: OutfieldSpeed }): FieldResolution {
+/** `rng`: when given, catches can be dropped (success falls from ~95% for a sitter to ~55% at full stretch); without it every
+ *  catch in reach is taken, which keeps rule tests deterministic. */
+export function resolveFielding(shot: ShotResult, fielders: FieldPlayer[], opts: { allowCatch: boolean; outfield: OutfieldSpeed; rng?: () => number }): FieldResolution {
   const fs = fielders;
   // 1) Catches: ball elevation 0.12–2.4 m before its first bounce, within a fielder's reach
   if (opts.allowCatch) {
@@ -114,8 +116,15 @@ export function resolveFielding(shot: ShotResult, fielders: FieldPlayer[], opts:
       if (s.p.z < FIELDER.catchMinZ || s.p.z > FIELDER.catchMaxZ) continue;
       for (const f of fs) {
         const d = dist2(f, s.p);
-        const gap = Math.max(0, d - FIELDER.catchReach);
-        if (reachTime(gap) <= s.t) {
+        // the bowler is off balance in the follow-through: shorter reach and a later start than a set fielder
+        const bowler = /bowler/i.test(f.id) || /bowler/i.test(f.label);
+        const gap = Math.max(0, d - (bowler ? 0.6 : FIELDER.catchReach)), need = reachTime(gap) + (bowler ? 0.2 : 0);
+        if (need <= s.t) {
+          const slack = s.t - need, pTake = Math.min(0.9, 0.45 + 0.8 * slack);   // professional catching efficiency ~75-90%
+          if (opts.rng && opts.rng() > pTake) {
+            const r = fieldedResult(s.t + 0.5, s.p, f);   // put down: the fumble costs half a second
+            return { ...r, note: `Dropped by ${f.label} (${Math.round(pTake * 100)}% chance); ${r.note}` };
+          }
           return { kind: "caught", runs: 0, boundary: null, fielderId: f.id, fielderLabel: f.label, pickupT: s.t,
             note: `Caught by ${f.label} at ${s.p.z.toFixed(1)} m (${d.toFixed(1)} m away)` };
         }

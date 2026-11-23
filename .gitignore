@@ -6,3 +6,5 @@ node_modules/
 next-env.d.ts
 public/models/*.task
 public/mediapipe/
+public/ort/
+public/models/*.onnx

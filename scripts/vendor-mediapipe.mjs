@@ -21,6 +21,24 @@ const wasmDst = join(root, "public/mediapipe/wasm");
 if (existsSync(wasmSrc)) { mkdirSync(wasmDst, { recursive: true }); cpSync(wasmSrc, wasmDst, { recursive: true }); console.log("vendor: copied MediaPipe WASM ->", wasmDst); }
 else console.log("vendor: @mediapipe/tasks-vision not installed yet, skipping WASM copy");
 
+// ONNX Runtime (MIT) for the bat model: the plain WASM build, one thread, so no cross-origin isolation is needed
+const ortSrc = join(root, "node_modules/onnxruntime-web/dist"), ortDst = join(root, "public/ort");
+if (existsSync(ortSrc)) {
+  mkdirSync(ortDst, { recursive: true });
+  for (const f of ["ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs"]) cpSync(join(ortSrc, f), join(ortDst, f));
+  console.log("vendor: copied ONNX Runtime WASM ->", ortDst);
+}
+// bat model (YOLOv8n-OBB trained in this repo on an MIT cricket-bat dataset; see models/README.md), hash-checked
+{
+  const src = join(root, "models/bat_obb.onnx"), dst = join(root, "public/models/bat_obb.onnx");
+  const want = existsSync(join(root, "models/bat_obb.onnx.sha256")) ? readFileSync(join(root, "models/bat_obb.onnx.sha256"), "utf8").trim().split(/\s+/)[0] : null;
+  if (existsSync(src)) {
+    const got = createHash("sha256").update(readFileSync(src)).digest("hex");
+    if (want && got !== want) console.log("vendor: models/bat_obb.onnx hash mismatch, not installed");
+    else { mkdirSync(dirname(dst), { recursive: true }); cpSync(src, dst); console.log("vendor: bat model ->", dst); }
+  }
+}
+
 const MIRROR_URL = "https://registry.npmjs.org/pose-landmarker-react-native/-/pose-landmarker-react-native-0.1.0.tgz";
 const MODELS = [
   // lite: live camera (real time). full: uploaded clips (accuracy). Hashes pinned; "full" is byte-identical in two independently

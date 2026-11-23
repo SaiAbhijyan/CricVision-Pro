@@ -57,6 +57,11 @@ The fit's own sigma only measures random scatter. On textured backgrounds the tr
 ## Live camera, end to end
 Headless Chrome with a fake camera looping a synthetic 130 km/h delivery (`--use-file-for-fake-video-capture`), drag-calibrated through the real UI, 30 s per run: camera 2.2 m high, 6 of 6 deliveries at 128.2-130.3 km/h (±1.5-4.1); camera 1.3 m high, 7 of 7 at 125.8-129.3 km/h, each flagged ±5 km/h with advice to raise the camera. This run found and fixed: the CSP blocking the audio detector (live never started), GPU-only pose init with no timeout, pose starving ball tracking, live mode applying no refusal policy, calibration buttons covering the handles, the flight fit failing when the camera is at release height, a stuck fit worker blocking every later ball, and speed reported at the first tracked point instead of release. Comparison with Fulltrack, CrickTrackAI and bat-tracking research: [BENCHMARK-VS-LEADERS.md](BENCHMARK-VS-LEADERS.md).
 
+## Bat tracking and the simulator (round 2)
+* Bat model (`models/README.md`): held-out test mAP50-95 0.811; bat ends within a median 3.2% of bat length and angle within 1.3° through the app's decoder; on unseen broadcast frames the bat is found 12/20 times, always on the bat. In Chrome under the production CSP a real (slow-motion) Kohli swing was tracked over 13 frames: straight bat at contact (1.3°), lift 83°, speeds withheld because the swing is slow motion.
+* Match simulator vs 295,732 IPL deliveries (`npm run calibrate`): every powerplay metric in band; details and gaps in [DATASETS.md](DATASETS.md).
+* Dynamic centre of pressure: exact on synthetic physics; reported with 0.3 cm pose noise, refused at 1 cm and above.
+
 ## What is not proven
 - **No radar-gun comparison yet.** Every speed is labelled an estimate. Neither supplied clip can give a validated speed (see above). Needed: a fixed-camera clip (tripod, 60 fps or more) of a delivery with a known speed.
 - **Live camera on real hardware** (only a fake camera feed so far).

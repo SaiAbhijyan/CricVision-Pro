@@ -74,7 +74,7 @@ function bowlingPlan(ctx: Ctx) {
     arm,
     runUpMs: (spin ? 3.6 : 6.9) - 0.5 * fat + gauss(rng) * 0.12,
     strideM: (spin ? 1.2 : 1.55) + gauss(rng) * 0.04,
-    overCm: -10 + gauss(rng) * 3.5 + 5 * fat + (rng() < 0.04 ? 16 : 0),
+    overCm: -12 + gauss(rng) * 3 + 3 * fat + (rng() < 0.004 ? 14 : 0),   // T20 no-balls are ~0.4-0.7% of deliveries (IPL ball-by-ball)
     releaseX: arm === "R" ? baseX : -baseX,
     elbowExtDeg: 6 + gauss(rng) * 1.5 + (rng() < 0.03 ? 12 : 0),
     kneeFfcDeg: 164 - 3 * fat,
@@ -85,7 +85,7 @@ function bowlingPlan(ctx: Ctx) {
     torso: 0.56 + gauss(rng) * 0.008 + (variation ? -0.045 : 0),
     stockArmSpeedScale: variation ? 0.85 : 1 + gauss(rng) * 0.01,
   });
-  if (rng() < 0.03) bp.releaseX = -1.5; // arm/back foot drifting out wide (return crease)
+  if (rng() < 0.002) bp.releaseX = -1.5; // back foot drifting outside the return crease: rare in real cricket
   return { bp, arm, variation, spin };
 }
 
@@ -94,8 +94,8 @@ function chooseTarget(ctx: Ctx, spin: boolean, variation: boolean, xr: number) {
   const os = offSign(cfg.handedness);
   const len = weighted<LengthClass>(rng, spin ? [["Full", 0.3], ["Good", 0.55], ["Short", 0.13], ["Yorker", 0.02]] : [["Full", 0.27], ["Good", 0.45], ["Short", 0.17], ["Yorker", 0.11]]);
   const yFromBatter = { Yorker: between(rng, 0.7, 1.7), Full: between(rng, 2.3, 4.8), Good: between(rng, 5.3, 7.8), Short: between(rng, 8.3, 10.8) }[len];
-  const line = weighted<LineClass>(rng, [["Off Channel", 0.38], ["Middle", 0.24], ["Leg", 0.16], ["Wide Off", 0.14], ["Wide Leg", 0.08]]);
-  const off = { "Wide Off": between(rng, 0.7, 1.0), "Off Channel": between(rng, 0.2, 0.55), Middle: between(rng, -0.1, 0.1), Leg: between(rng, -0.55, -0.2), "Wide Leg": between(rng, -1.0, -0.7) }[line];
+  const line = weighted<LineClass>(rng, [["Off Channel", 0.44], ["Middle", 0.26], ["Leg", 0.18], ["Wide Off", 0.09], ["Wide Leg", 0.03]]);   // wides ~3-4% in IPL
+  const off = { "Wide Off": between(rng, 0.6, 0.86), "Off Channel": between(rng, 0.2, 0.55), Middle: between(rng, -0.1, 0.1), Leg: between(rng, -0.55, -0.2), "Wide Leg": between(rng, -1.0, -0.7) }[line];
   void variation;
   const yb = PITCH_LENGTH - yFromBatter;
   const xd = off * os;                       // desired line at the batter's stumps
@@ -106,7 +106,20 @@ function chooseTarget(ctx: Ctx, spin: boolean, variation: boolean, xr: number) {
 
 /* ------------------------------------------ batting plan ------------------------------------------ */
 
-type Intent = "leave" | "defend" | "drive" | "cut" | "pull" | "flick" | "sweep" | "reverse";
+/** Middle of the widest gap between the inner-ring fielders, as a relative azimuth the batter can reach for this line. */
+function gapAzimuth(ctx: Ctx, xRel: number): number {
+  const os = offSign(ctx.cfg.handedness), lo = xRel > 0.15 ? -40 : -110, hi = xRel < -0.15 ? 40 : 115;
+  const az = ctx.field.filter((f) => !f.keeper && Math.hypot(f.x, f.y - BATTER_CREASE_Y) < 36)
+    .map((f) => wrap180(Math.atan2(f.x, -(f.y - BATTER_CREASE_Y)) * (180 / Math.PI) * os))
+    .filter((a) => a > lo - 30 && a < hi + 30).sort((a, b) => a - b);
+  const pts = [lo, ...az.filter((a) => a > lo && a < hi), hi];
+  let best = { w: -1, c: 0 };
+  for (let i = 1; i < pts.length; i++) if (pts[i] - pts[i - 1] > best.w) best = { w: pts[i] - pts[i - 1], c: (pts[i] + pts[i - 1]) / 2 };
+  return best.c;
+}
+const wrap180 = (a: number) => ((((a + 180) % 360) + 360) % 360) - 180;
+
+type Intent = "leave" | "defend" | "push" | "drive" | "cut" | "pull" | "flick" | "sweep" | "reverse";
 
 function battingPlan(ctx: Ctx, flight: DeliveryFlight, length: LengthClass | null, line: LineClass | null, spin: boolean) {
   const { rng, cfg, skill } = ctx;
@@ -122,14 +135,18 @@ function battingPlan(ctx: Ctx, flight: DeliveryFlight, length: LengthClass | nul
   else if (length === "Good") intent = rng() < 0.55 ? (xRel < -0.1 ? "flick" : "defend") : "drive";
   else intent = xRel < -0.12 ? "flick" : "drive";
   if (intent === "defend" && rng() < aggr * 0.35) intent = xRel < -0.1 ? "flick" : "drive";
-  const loft = rng() < 0.2 * aggr;
+  // working the ball into a gap for one: where most singles come from (27% of powerplay balls, 45% in the middle overs, IPL)
+  const pushP = { "Net Free-Hit": 0.4, "Super Over": 0.2, "Powerplay Chase": 0.36 }[cfg.format];
+  if (intent !== "leave" && intent !== "sweep" && intent !== "reverse" && rng() < pushP) intent = "push";
+  const loft = rng() < { "Net Free-Hit": 0.15, "Super Over": 0.4, "Powerplay Chase": 0.2 }[cfg.format] * aggr;   // death batters go aerial far more (sixes 8.6% vs 4.2% in the powerplay)
   let relAz = 0, el = 8, bat = 24, front = true, stride = 0.55, yawDeg = 25;
   switch (intent) {
-    case "drive": relAz = xRel > 0.3 ? between(rng, 30, 65) : between(rng, -10, 25); el = loft ? between(rng, 26, 40) : between(rng, 3, 14); bat = between(rng, 22, 30) * (0.8 + 0.2 * aggr); stride = between(rng, 0.45, 0.7); yawDeg = 30; break;
+    case "drive": relAz = xRel > 0.3 ? between(rng, 30, 65) : between(rng, -10, 25); el = loft ? between(rng, 26, 40) : between(rng, 0, 8); bat = between(rng, 22, 30) * (0.8 + 0.2 * aggr); stride = between(rng, 0.45, 0.7); yawDeg = 30; break;
     case "defend": relAz = between(rng, -12, 12); el = between(rng, 0, 4); bat = 10; front = rng() < 0.7; stride = front ? between(rng, 0.4, 0.6) : 0.1; yawDeg = 10; break;
-    case "cut": relAz = between(rng, 80, 135); el = between(rng, 3, 20); bat = between(rng, 22, 28); front = false; stride = 0.08; yawDeg = 45; break;
-    case "pull": relAz = between(rng, -115, -50); el = loft ? between(rng, 24, 38) : between(rng, 8, 24); bat = between(rng, 24, 31); front = false; stride = 0.08; yawDeg = 70; break;
-    case "flick": relAz = between(rng, -80, -35); el = between(rng, 2, 16); bat = between(rng, 20, 27); stride = between(rng, 0.35, 0.6); yawDeg = 50; break;
+    case "push": relAz = gapAzimuth(ctx, xRel) + gauss(rng) * 6; el = between(rng, -1, 3); bat = between(rng, 7, 11); front = length !== "Short"; stride = front ? between(rng, 0.35, 0.55) : 0.1; yawDeg = 20; break;
+    case "cut": relAz = between(rng, 80, 135); el = between(rng, 1, 12); bat = between(rng, 22, 28); front = false; stride = 0.08; yawDeg = 45; break;
+    case "pull": relAz = between(rng, -115, -50); el = loft ? between(rng, 24, 38) : between(rng, 4, 16); bat = between(rng, 24, 31); front = false; stride = 0.08; yawDeg = 70; break;
+    case "flick": relAz = between(rng, -80, -35); el = between(rng, 0, 10); bat = between(rng, 20, 27); stride = between(rng, 0.35, 0.6); yawDeg = 50; break;
     case "sweep": relAz = between(rng, -150, -110); el = between(rng, 6, 26); bat = between(rng, 20, 26); stride = 0.5; yawDeg = 70; break;
     case "reverse": relAz = between(rng, 110, 150); el = between(rng, 6, 24); bat = between(rng, 20, 26); stride = 0.5; yawDeg = 60; break;
     default: break;
@@ -200,10 +217,12 @@ export function simulateBall(ctx: Ctx): SimBall {
   const tC = tIdeal + dT;
   const sC = stateAtT(flight, tC);
   const errM = yIdeal - sC.p.y;
-  const lat = gauss(rng) * (0.022 + (1 - ctx.skill) * 0.03);
+  // lateral miss-hit: bat face ~10.8 cm + ball 7.2 cm => contact within 9 cm of centre, the outer ~2 cm is an edge.
+  // At skill 0.6 this gives ~10% played-and-missed and ~9% edges of balls swung at, in line with T20 ball-by-ball rates.
+  const lat = gauss(rng) * (plan.intent === "push" ? 0.03 : 0.035 + (1 - ctx.skill) * 0.05);
   const reach = plan.intent === "pull" ? 1.9 : 1.55;
-  let contact = swing && Math.abs(lat) <= 0.11 && sC.p.z >= 0.04 && sC.p.z <= reach && Math.abs(errM) < 1.0;
-  const edge = contact && Math.abs(lat) > 0.05;
+  let contact = swing && Math.abs(lat) <= 0.09 && sC.p.z >= 0.04 && sC.p.z <= reach && Math.abs(errM) < 1.0;
+  const edge = contact && Math.abs(lat) > 0.072;
   const tTrig = Math.min(0.14 + rng() * 0.12, tC - 0.22);
   const bat = defaultBatter({
     hand: cfg.handedness, impactT: tC, triggerT: Math.max(0.05, tTrig), strideM, frontFootPct: P * 100, headDriftCm: headDrift * 1,
@@ -220,7 +239,10 @@ export function simulateBall(ctx: Ctx): SimBall {
   /* ---------- extras & pad ---------- */
   let padFirst = false;
   let padT = 0;
-  if (!contact) {
+  // a ball that beats the bat through the gap between bat and pad is not stopped by the pad: that is where most bowled
+  // dismissals come from (bowled is ~15% of T20 wickets); the gap is widest when driving off the front foot
+  const throughGate = swing && !contact && plan.intent !== "defend" && rng() < (plan.front ? 0.45 : 0.25);
+  if (!contact && !throughGate) {
     const sp = stateAtY(flight, BATTER_CREASE_Y + 0.1);
     if (sp && sp.p.z < 0.5 && Math.abs(sp.p.x - 0.05 * os) < 0.24) { padFirst = true; padT = sp.t; }
   }
@@ -266,7 +288,7 @@ export function simulateBall(ctx: Ctx): SimBall {
       from: contactPos, exitSpeedMs: ex.speedMs, azimuthDeg: ex.azimuthDeg, elevationDeg: ex.elevationDeg,
       backspinRpm: ex.backspinRpm, outfield: cfg.outfield, boundaryRadius: cfg.boundaryRadius,
     });
-    const fr = resolve(resolveFielding(shotRes, field, { allowCatch: !dismissalsVoid, outfield: cfg.outfield }));
+    const fr = resolve(resolveFielding(shotRes, field, { allowCatch: !dismissalsVoid, outfield: cfg.outfield, rng }));
     fielderId = fr.fielderId;
     notes.push(fr.note);
     if (fr.kind === "caught") { wicket = "caught"; runs = 0; }

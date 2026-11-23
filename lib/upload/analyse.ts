@@ -3,7 +3,8 @@
  * `ClipSource` (an uploaded video in the browser, rendered frames in tests). It returns the same BallRecords, so the
  * scoreboard, report and replay screens treat an uploaded clip exactly like a live session.
  */
-import type { AnalysisQuality, BallRecord, Calibration, CameraModel, ClipMeta, FieldPlayer, SessionConfig } from "@/lib/types";
+import type { AnalysisQuality, BallRecord, Calibration, CameraModel, ClipMeta, FieldPlayer, Pt, SessionConfig } from "@/lib/types";
+import { batSwing, type BatPose, type BatSwing } from "@/lib/cv/bat";
 import { buildCameraModel, cameraCentre } from "@/lib/physics/homography";
 import { fitFlightTo2D, type FitResult, type TrackObs } from "@/lib/physics/trackfit";
 import { toGray, type Gray } from "@/lib/cv/ball-detector";
@@ -35,11 +36,15 @@ export interface ClipSource {
   frame(k: number, o: { pose: boolean; poseCam?: CameraModel }): Promise<ClipFrame>;
   /** called at a camera cut, so person-following restarts in the new shot */
   newShot?(): void;
+  /** the full-colour frame k (for bat tracking); sources without colour leave it out */
+  image?(k: number): Promise<{ img: CanvasImageSource; w: number; h: number; t: number } | null>;
 }
 
 export interface ManualContact { t: number; kind: ImpactKind }
 
 export interface AnalyseOptions {
+  /** bat detector (two-point bat skeleton per frame); run on the frames around each swing when the source has colour frames */
+  bat?: { detect(img: CanvasImageSource, W: number, H: number, t: number, hands: Pt | null): Promise<BatPose | null> };
   /** analyse only this part of the clip, in clip seconds (e.g. one camera shot of a highlights reel) */
   range?: { start: number; end: number };
   cfg: SessionConfig;
@@ -324,7 +329,7 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
   const { cfg } = o;
   const warnings: string[] = [];
   const cuts = new CutDetector();
-  const batter: Skeleton[] = [];
+  const batter: Skeleton[] = [], frameT: number[] = [];
   let tFirst: number | null = null, tLastF = 0;
   const k0 = o.range ? Math.max(0, Math.floor(o.range.start * src.fps)) : 0;
   const k1 = o.range ? Math.min(src.frameCount, Math.ceil(o.range.end * src.fps)) : src.frameCount;
@@ -332,7 +337,7 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
   for (let k = k0; k < k1; k++) {
     if (o.signal?.aborted) break;
     const f = await src.frame(k, { pose: (k - k0) % stride === 0 });
-    if (tFirst === null) tFirst = f.t; tLastF = f.t;
+    if (tFirst === null) tFirst = f.t; tLastF = f.t; frameT.push(f.t);
     if (cuts.push(f.t, f.gray)) src.newShot?.();
     if (f.pose?.batter) batter.push(f.pose.batter);
     if (k % 5 === 0) o.onProgress?.(k - k0, k1 - k0, `Frame ${k + 1} of ${k1}`);
@@ -358,6 +363,11 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
         x.record.quality!.warnings.push(`This camera looks along the batter's stride (${Math.round(axisDeg)}° off the line of sight), so weight transfer and swing path are not measured: film side-on for those.`);
       }
       x.record.quality!.warnings.push("Batting-only mode: scale comes from the batter's height and direction from the stance, so lengths are approximate.");
+      if (o.bat && src.image && x.record.batting) {
+        const bs = await trackBat(src, o.bat, frameT, k0, x.impactT, seg);
+        if (bs) x.record.batting.bat = batForSwing(bs, x.record.batting.downswingMs);
+        else x.record.quality!.warnings.push("The bat was not seen clearly enough around contact to track it (edge-on to the camera or hidden by the body).");
+      }
       balls.push(x.record);
       await o.onDelivery?.({ index: x.record.index, tStart: x.impactT - 1.2, tEnd: x.impactT + 0.4, track: [], record: x.record, bowler: [], batter: aligned.filter((f) => f.t >= x.impactT - 2.5 && f.t <= x.impactT + 0.4) });
     }
@@ -375,6 +385,32 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
   if (balls.length) warnings.push(`${balls.length} swing${balls.length > 1 ? "s" : ""} analysed from the body alone: bat speed, weight transfer, head movement and swing plane. Timing, shot and runs need the ball.`);
   o.onProgress?.(k1 - k0, k1 - k0, "Done");
   return { balls, wagons: balls.map(() => undefined), score: newScore(cfg.format), field: [], diagnostics: [], warnings, model: null, shots: shotsFromCuts(cuts.cuts, tLastF + 1 / src.fps, 0.4, tFirst ?? 0) };
+}
+
+/** A slow-motion replay (downswing over 0.7 s) keeps the bat's angles but not its speeds: same rule as the hand-based bat speed. */
+export function batForSwing(bs: BatSwing | NonNullable<NonNullable<BallRecord["batting"]>["bat"]>, downswingMs: number): NonNullable<BallRecord["batting"]>["bat"] {
+  if (downswingMs <= 700) return bs;
+  const { toeSpeedKph: _ts, peakAngularDegS: _pa, ...angles } = bs; void _ts; void _pa;
+  return angles;
+}
+
+/** Bat skeleton on every frame from 0.6 s before contact to 0.12 s after, oriented by the batter's hands, then swing metrics. */
+async function trackBat(src: ClipSource, det: NonNullable<AnalyseOptions["bat"]>, frameT: number[], k0: number, impactT: number, people: Skeleton[]) {
+  const ks: number[] = [];
+  for (let i = 0; i < frameT.length; i++) if (frameT[i] >= impactT - 0.6 && frameT[i] <= impactT + 0.12) ks.push(k0 + i);
+  const step = Math.max(1, Math.round(ks.length / 36));   // at most ~36 detections per swing
+  const track: BatPose[] = [];
+  let n = 0;
+  for (let i = 0; i < ks.length; i += step) {
+    const im = await src.image!(ks[i]);
+    if (!im) continue;
+    n++;
+    const near = people.reduce<Skeleton | null>((b, p) => (!b || Math.abs(p.t - im.t) < Math.abs(b.t - im.t) ? p : b), null);
+    const hands = near?.hn && Math.abs(near.t - im.t) < 0.1 ? { x: near.hn.x * im.w, y: near.hn.y * im.h } : null;
+    try { const p = await det.detect(im.img, im.w, im.h, im.t, hands); if (p) track.push(p); } catch { return null; }
+  }
+  const bs = batSwing(track, impactT, n);
+  return bs && bs.coverage >= 0.4 ? bs : null;
 }
 
 export { toGray };

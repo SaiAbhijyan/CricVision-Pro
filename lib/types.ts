@@ -154,6 +154,10 @@ export interface BattingBiomech {
   headDriftCm: number;             // lateral head drift stance -> impact
   /** head relative to the front ankle at contact, along the pitch: + = head behind the front foot (falling back), - = ahead of it */
   headOverFrontFootCm?: number;
+  /** dynamic centre of pressure on the front foot at contact (0..100): where the feet push, which leads the static weight when braking */
+  frontFootPressurePct?: number;
+  /** bat tracked as a two-point skeleton (handle, toe) around contact; absent when the bat was not seen clearly */
+  bat?: { batAngleAtContactDeg: number; batLiftDeg: number; /** absent when the swing is slow motion: angles hold, speeds do not */ peakAngularDegS?: number; toeSpeedKph?: number; coverage: number; frames: number };
   backliftDeg: number;
   frontElbowDeg: number;
   bottomHandPct: number;           // bottom-hand dominance 0..100
