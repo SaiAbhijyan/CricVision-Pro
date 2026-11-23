@@ -55,6 +55,50 @@ export function weightState(j: Joints, hand: Handedness): WeightState {
   return { com, back, front, ground: { x: com.x, y: com.y, z: 0 }, frontPct: Math.max(-25, Math.min(125, s * 100)) };
 }
 
+/**
+ * Dynamic centre of pressure (zero-moment point of a point mass): CoP = CoM - z / (g + z'') * CoM''. Static CoM says where the
+ * weight is; the CoP says where the feet are pushing. They differ whenever the body accelerates: braking onto the front foot
+ * puts pressure ahead of the CoM, pushing off the back foot puts it behind. Acceleration comes from a local quadratic fit over
+ * +/-`halfWin` seconds (with its standard error from the fit residuals: frames where that error would move the share by more
+ * than `maxSdPct` points are refused, null), not from double differencing, which would turn 1 cm of pose jitter at 30 fps into metres per second
+ * squared. Returns the front-foot share (0 = all back, 100 = all front) per frame, or null where the window is too thin.
+ */
+export function pressureSeries(frames: { t: number; j: Joints }[], hand: Handedness, halfWin = 0.1, maxSdPct = 10): (number | null)[] {
+  const com = frames.map((f) => centreOfMass(f.j));
+  const fs = frontSide(hand), bs = fs === "l" ? "r" : "l";
+  return frames.map((f, i) => {
+    const idx: number[] = [];
+    for (let k = 0; k < frames.length; k++) if (Math.abs(frames[k].t - f.t) <= halfWin + 1e-9) idx.push(k);
+    if (idx.length < 5 || idx[0] >= i || idx[idx.length - 1] <= i) return null;   // need points on both sides
+    const fit = (pick: (v: Vec3) => number) => quadFit(idx.map((k) => frames[k].t - f.t), idx.map((k) => pick(com[k])));
+    const fy = fit((v) => v.y), ay = clampA(fy.acc), ax = clampA(fit((v) => v.x).acc), az = clampA(fit((v) => v.z).acc);
+    const z = com[i].z, gEff = Math.max(4, 9.81 + az);
+    const cop = { x: com[i].x - (z / gEff) * ax, y: com[i].y - (z / gEff) * ay };
+    const back = footPoint(f.j, bs), front = footPoint(f.j, fs), dy = front.y - back.y;
+    if (Math.abs(dy) <= 0.06) return null;
+    // refuse when the pose is too noisy for a second derivative: uncertainty of the front-foot share over 10 points
+    if ((((z / gEff) * fy.accSe) / Math.abs(dy)) * 100 > maxSdPct) return null;
+    return Math.max(-25, Math.min(125, ((cop.y - back.y) / dy) * 100));
+  });
+}
+const clampA = (a: number) => Math.max(-15, Math.min(15, a));   // a batter's CoM does not exceed ~1.5 g horizontally
+/** Second derivative at dt = 0 of the least-squares quadratic through (dt, v). */
+export function quadAccel(dt: number[], v: number[]): number { return quadFit(dt, v).acc; }
+/** Least-squares quadratic v = a + b dt + c dt^2: acceleration 2c and its standard error from the fit's own residuals. */
+export function quadFit(dt: number[], v: number[]): { acc: number; accSe: number } {
+  let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, b0 = 0, b1 = 0, b2 = 0;
+  for (let k = 0; k < dt.length; k++) { const d = dt[k], d2 = d * d; s0++; s1 += d; s2 += d2; s3 += d2 * d; s4 += d2 * d2; b0 += v[k]; b1 += v[k] * d; b2 += v[k] * d2; }
+  const det = s0 * (s2 * s4 - s3 * s3) - s1 * (s1 * s4 - s3 * s2) + s2 * (s1 * s3 - s2 * s2);
+  if (Math.abs(det) < 1e-18) return { acc: 0, accSe: Infinity };
+  const a = (b0 * (s2 * s4 - s3 * s3) - s1 * (b1 * s4 - s3 * b2) + s2 * (b1 * s3 - s2 * b2)) / det;
+  const b = (s0 * (b1 * s4 - b2 * s3) - b0 * (s1 * s4 - s3 * s2) + s2 * (s1 * b2 - b1 * s2)) / det;
+  const c = (s0 * (s2 * b2 - b1 * s3) - s1 * (s1 * b2 - b1 * s2) + b0 * (s1 * s3 - s2 * s2)) / det;   // third column replaced by b
+  let rss = 0; for (let k = 0; k < dt.length; k++) { const d = dt[k]; rss += (v[k] - (a + b * d + c * d * d)) ** 2; }
+  const dof = Math.max(1, dt.length - 3), sigma2 = Math.max(rss / dof, 1e-8);   // floor: never claim zero noise
+  const invCC = (s0 * s2 - s1 * s1) / det;   // (XᵀX)⁻¹ entry for c
+  return { acc: 2 * c, accSe: 2 * Math.sqrt(Math.max(0, sigma2 * invCC)) };
+}
+
 import type { ClipComFrame, Pt } from "@/lib/types";
 import type { Skeleton } from "./skeleton";
 

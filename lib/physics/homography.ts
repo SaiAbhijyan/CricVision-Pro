@@ -1,4 +1,4 @@
-import type { Calibration, CameraModel, Mat3, Pt } from "@/lib/types";
+import type { Calibration, CameraModel, Mat3, Pt, Vec3 } from "@/lib/types";
 import { PITCH_LENGTH, PITCH_WIDTH, STUMP_HEIGHT } from "./constants";
 
 /* ---------- small linear algebra ---------- */
@@ -272,4 +272,21 @@ export function pointInPolygon(p: Pt, poly: Pt[]): boolean {
     if (yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+/** Camera centre in world metres (C = -Rᵀt). Its z is the camera's height above the pitch. */
+export function cameraCentre(cam: CameraModel): Vec3 {
+  const R = cam.R, t = cam.t;
+  return { x: -(R[0] * t[0] + R[3] * t[1] + R[6] * t[2]), y: -(R[1] * t[0] + R[4] * t[1] + R[7] * t[2]), z: -(R[2] * t[0] + R[5] * t[1] + R[8] * t[2]) };
+}
+
+/** Where the pixel's ray crosses the vertical plane at distance Y along the pitch. Unlike unprojectAtHeight this stays
+ *  well-conditioned when the ray is nearly level, e.g. the release point seen by a camera at about release height. */
+export function unprojectAtY(cam: CameraModel, p: Pt, Y: number): Vec3 | null {
+  const C = cameraCentre(cam), R = cam.R, u = (p.x - cam.cx) / cam.f, v = (p.y - cam.cy) / cam.f;
+  const d = { x: R[0] * u + R[3] * v + R[6], y: R[1] * u + R[4] * v + R[7], z: R[2] * u + R[5] * v + R[8] };   // Rᵀ·[u v 1]
+  if (Math.abs(d.y) < 1e-9) return null;
+  const s = (Y - C.y) / d.y;
+  if (s <= 0) return null;
+  return { x: C.x + s * d.x, y: Y, z: C.z + s * d.z };
 }

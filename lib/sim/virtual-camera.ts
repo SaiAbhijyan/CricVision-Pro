@@ -6,9 +6,11 @@ import { WORLD_CORNERS } from "@/lib/physics/homography";
  * Nominal broadcast-style camera behind the batter's stumps (screen-right = +X) used by the simulator,
  * the calibration UI's default marker layout and the replay renderer.
  */
-export function virtualCalibration(w = 1280, h = 720, end: "batter" | "bowler" = "batter"): Calibration {
-  const f = 0.95 * w;
-  const dist = 4.5, height = 2.4;
+/** `rig`: tripod distance behind the stumps (m), height (m) and focal length as a share of image width. Defaults are the
+ *  original test rig; { dist: 4, height: 1.3, focal: 0.73 } is a phone main camera on Fulltrack's recommended tripod. */
+export function virtualCalibration(w = 1280, h = 720, end: "batter" | "bowler" = "batter", rig: { dist?: number; height?: number; focal?: number } = {}): Calibration {
+  const f = (rig.focal ?? 0.95) * w;
+  const dist = rig.dist ?? 4.5, height = rig.height ?? 2.4;
   const th = Math.atan2(height, dist + PITCH_LENGTH / 2);
   const s = Math.sin(th), c = Math.cos(th);
   const sgn = end === "batter" ? 1 : -1;

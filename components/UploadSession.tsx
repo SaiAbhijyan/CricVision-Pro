@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Calibration, ClipMeta, SessionConfig } from "@/lib/types";
 import { buildCameraModel } from "@/lib/physics/homography";
-import { PoseTracker } from "@/lib/cv/pose";
+import { PoseTracker, startPose } from "@/lib/cv/pose";
+import { BatDetector } from "@/lib/cv/bat";
 import { FrameRing } from "@/lib/cv/frame-ring";
 import { fitInWorker } from "@/lib/live/fit-client";
 import { buildLiveClip } from "@/lib/live/clip";
@@ -33,6 +34,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
   const video = useRef<HTMLVideoElement>(null);
   const abort = useRef({ aborted: false });
   const file = useRef<File | null>(null);
+  const [calSlot, setCalSlot] = useState<HTMLDivElement | null>(null);   // calibration buttons live below the video
   const [phase, setPhase] = useState<Phase>("pick");
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -118,12 +120,18 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
       const notes: string[] = [];
       if (contactMode === "audio" && !swingMode && !hasAudio) notes.push("This clip has no readable audio track, so bat and pad contact could not be detected. Re-run and mark the contact frame yourself.");
       setProgress((p) => ({ ...p, note: "Loading body tracking…" }));
-      for (const delegate of ["GPU", "CPU"] as const) {
-        try { const p = new PoseTracker(cam, { delegate, ...(cam ? {} : { bodyScale: { statureM: stature, imageWidth: dims.w, imageHeight: dims.h, subject: subject ? { x: subject.x, y: subject.y } : undefined } }) }); await p.init(); pose = p; break; } catch { /* try next delegate */ }
-      }
+      pose = (await startPose(cam, { model: "full", ...(cam ? {} : { bodyScale: { statureM: stature, imageWidth: dims.w, imageHeight: dims.h, subject: subject ? { x: subject.x, y: subject.y } : undefined } }) }, 45000))?.pose ?? null;
       if (!pose && swingMode) throw new Error("Body tracking could not start in this browser, and batting-only analysis needs it. Try Chrome or Edge.");
       if (!pose) notes.push("Body tracking could not start in this browser, so only the ball flight was analysed.");
       const src = new VideoClipSource({ video: v, mediaFps, timeScale: slow, pose, ring });
+      // bat tracking (two-point bat skeleton) runs only on the frames around each swing; a missing model or runtime just skips it
+      const batDet = swingMode ? new BatDetector() : null;
+      let batOk = true;
+      const bat = batDet ? { detect: async (img: CanvasImageSource, W: number, H: number, t: number, hands: { x: number; y: number } | null) => {
+        if (!batOk) return null;
+        try { return await batDet.detect(img, W, H, t, hands); }
+        catch { batOk = false; notes.push("Bat tracking could not start in this browser, so bat angle and toe speed are not measured."); return null; }
+      } } : undefined;
       const clips: { meta: ClipMeta; frames: Blob[] }[] = [];
       const res = await analyseClip(src, {
         cfg: swingMode && cfg.mode === "Bowling Focus" ? { ...cfg, mode: "Batting Focus" } : cfg, cal: oriented, impacts, signal: abort.current,
@@ -132,8 +140,9 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
           : swingMode && subject ? { start: clipTime(subject.t, slow), end: clipTime(dims.dur, slow) } : undefined,
         cameraMotion: !swingMode && moving ? "compensate" : "fixed", calT: clipTime(calMediaT, slow),
         manualContact: contactMode === "manual" && manual ? { t: clipTime(manual.mediaT, slow), kind: manual.kind } : null,
-        poseStride: Math.max(1, Math.round(eff / 15)),
+        poseStride: Math.max(1, Math.round(eff / (swingMode ? 30 : 15))),   // swings need the full 30 Hz to time the downswing
         fit: (c, obs, s) => fitInWorker(c, obs, s, 60000),
+        bat,
         onProgress: (k, n, note) => setProgress({ k, n, note }),
         onDelivery: async (d) => {
           if (!cam) return;   // batting-only: no camera model to draw the replay overlay
@@ -141,6 +150,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
           if (c) clips.push(c);
         },
       });
+      batDet?.close();
       if (abort.current.aborted) { setPhase("setup"); return; }
       setDiags(res.diagnostics); setMessages([...notes, ...res.warnings]);
       if (!res.balls.length) { setPhase("done"); return; }
@@ -176,7 +186,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
           <div className="space-y-2">
             <div className="relative overflow-hidden rounded-xl bg-black" style={{ aspectRatio: `${dims.w} / ${dims.h}` }}>
               <video ref={video} src={url} muted playsInline preload="auto" className="h-full w-full" onLoadedMetadata={onMeta} onError={() => { setError("That file could not be opened as a video by this browser. Try an MP4 (H.264) or WebM clip."); setPhase("pick"); }} onSeeked={() => setNow(video.current?.currentTime ?? 0)} />
-              {calibrating && <CalibrationOverlay width={dims.w} height={dims.h} labels={LABELS[end]} initial={cal ?? undefined} onLock={(c) => { setCal(c); setCalMediaT(now); setCalibrating(false); }} />}
+              {calibrating && <CalibrationOverlay width={dims.w} height={dims.h} controlsIn={calSlot} labels={LABELS[end]} initial={cal ?? undefined} onLock={(c) => { setCal(c); setCalMediaT(now); setCalibrating(false); }} />}
               {picking && (
                 <button aria-label="Tap the batter" className="absolute inset-0 cursor-crosshair bg-black/20 text-sm text-white" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSubject({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, t: now }); setPicking(false); }}>
                   <span className="rounded bg-black/70 px-2 py-1">Tap the batter's waist</span>
@@ -184,6 +194,7 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
               )}
               {subject && !picking && <span aria-hidden className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-lime-300" style={{ left: `${subject.x * 100}%`, top: `${subject.y * 100}%` }} />}
             </div>
+            <div ref={setCalSlot} className="empty:hidden rounded-lg bg-black/40" />
             {phase === "setup" && (
               <div className="space-y-2">
                 <input aria-label="Scrub the clip" type="range" min={0} max={dims.dur || 1} step={1 / mediaFps} value={now} onChange={(e) => seek(+e.target.value)} className="w-full" />
@@ -284,7 +295,9 @@ export default function UploadSession({ cfg }: { cfg: SessionConfig }) {
                 <p className="font-medium">{swingMode ? "No swing could be analysed." : "No delivery could be analysed."}</p>
                 {messages.map((m, i) => <p key={i} className="text-white/70">{m}</p>)}
                 {diags.map((d) => <p key={d.index} className="text-white/55">Track {d.index}: {d.trackPoints} ball positions. {d.reason ?? ""}</p>)}
-                <ul className="list-disc pl-5 text-white/55"><li>Calibrate again, with the corners exactly on the crease lines.</li><li>Check the slow-motion setting and frame rate.</li><li>The ball must be visible against the pitch for at least half a second.</li></ul>
+                {swingMode
+                  ? <ul className="list-disc pl-5 text-white/55"><li>The batter must be in frame head to feet through the whole shot.</li><li>Tap the batter if other people are in the picture.</li><li>Set the slow-motion factor for slow-motion replays.</li><li>Pick one camera shot with "Find camera shots" for highlight reels.</li></ul>
+                  : <ul className="list-disc pl-5 text-white/55"><li>Calibrate again, with the corners exactly on the crease lines.</li><li>Check the slow-motion setting and frame rate.</li><li>The ball must be visible against the pitch for at least half a second.</li></ul>}
                 <button className="btn-primary" onClick={() => setPhase("setup")}>Back to settings</button>
               </div>
             )}

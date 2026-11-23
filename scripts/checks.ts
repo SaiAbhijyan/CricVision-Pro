@@ -62,7 +62,7 @@ async function main() {
   const s1 = mkSession("a", 1_000, base, 11);
   const swings = s1.balls.filter((b) => b.batting?.swingDetected);
   ok(swings.length > 8, "simulator produces swings");
-  ok(swings.every((b) => b.batting!.batSpeedKph > 30 && b.batting!.batSpeedKph < 140), "bat speeds are plausible (30-140 km/h)");
+  ok(swings.every((b) => b.batting!.batSpeedKph > 20 && b.batting!.batSpeedKph < 140), "bat speeds are plausible (20-140 km/h; a soft push into a gap is ~25-40)");
   ok(swings.every((b) => b.batting!.downswingMs > 100 && b.batting!.swingArcCm > 20), "downswing time and arc are measured");
 
   /* ---- arm rotation, kinetic chain, spin rate, review detail ---- */
@@ -92,7 +92,9 @@ async function main() {
   ok(sweetPool.length >= 10 && otherPool.length >= 10, `shot pool large enough (${sweetPool.length}/${otherPool.length})`);
   const mix = (id: string, at: number, sweetShare: number): SessionLike => {
     const n = 12, ns = Math.round(n * sweetShare);
-    return { id, startedAt: at, config: base, balls: [...sweetPool.slice(0, ns), ...otherPool.slice(0, n - ns)].map((b, i) => ({ ...b, index: i + 1, outcome: { ...b.outcome, legal: true } })) };
+    // timing improves, everything else held equal: middled shots include more soft pushes (different stride and head
+    // movement), so head drift is fixed here or the mix itself would read as a worsening head position
+    return { id, startedAt: at, config: base, balls: [...sweetPool.slice(0, ns), ...otherPool.slice(0, n - ns)].map((b, i) => ({ ...b, index: i + 1, outcome: { ...b.outcome, legal: true }, batting: b.batting ? { ...b.batting, headDriftCm: 3 } : b.batting })) };
   };
   const sess = [mix("s1", 1_000, 0.25), mix("s2", 2_000, 0.45), mix("s3", 3_000, 0.65), mix("s4", 4_000, 0.85)];
   const dna = batterDNA(sess);
@@ -175,6 +177,82 @@ async function main() {
     ok(Math.abs(lh.biomech.frontFootPct - ex.biomech.frontFootPct) < 12, "left-hander mirrors right-hander weight: " + lh.biomech.frontFootPct.toFixed(0));
   }
 
+  // --- production CSP forbids eval: no client code may evaluate strings; the worklet source must match the class ---
+  {
+    const { readdirSync, readFileSync, statSync } = await import("fs");
+    const { join } = await import("path");
+    const walk = (d: string): string[] => readdirSync(d).flatMap((f) => { const p = join(d, f); return statSync(p).isDirectory() ? walk(p) : /\.tsx?$/.test(f) ? [p] : []; });
+    const offenders = ["lib", "components", "app"].flatMap((d) => walk(join(__dirname, "..", d))).filter((f) => /(^|[^.\w])(new Function\(|eval\()/m.test(readFileSync(f, "utf8").replace(/^\s*(\/\/|\*).*$/gm, "")));
+    ok(offenders.length === 0, `no eval / new Function in client code (found in ${offenders.join(", ")})`);
+    const { ONSET_CORE_SOURCE, createOnsetCore } = await import("../lib/audio/onset-core");
+    // run the worklet's copy in an isolated scope the way the AudioWorklet would (test-only evaluation, never shipped)
+    const viaSource = new Function(`${ONSET_CORE_SOURCE}; return new OnsetCore(48000);`)() as ReturnType<typeof createOnsetCore>;
+    let seed = 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) - 0.5;
+    const sig = new Float32Array(96000);
+    for (let i = 0; i < sig.length; i++) sig[i] = 0.004 * rnd() + 0.002 * Math.sin(i * 0.37);
+    for (let i = 24000; i < 24200; i++) sig[i] += 0.5 * Math.exp(-(i - 24000) / 30) * Math.sin(i * 1.9);      // sharp bat click
+    for (let i = 60000; i < 61500; i++) sig[i] += 0.3 * Math.exp(-(i - 60000) / 600) * Math.sin(i * 0.05);   // dull pad thud
+    for (let i = 80000; i < 80150; i++) sig[i] += 0.06 * Math.exp(-(i - 80000) / 25) * Math.sin(i * 2.1);   // quiet edge
+    const viaClass = createOnsetCore(48000), viaWorklet = new Function(`${ONSET_CORE_SOURCE}; return new OnsetCore(48000);`)() as ReturnType<typeof createOnsetCore>;
+    const a: unknown[] = [], b: unknown[] = [];
+    for (let i = 0; i < sig.length; i += 128) { a.push(...viaClass.process(sig.subarray(i, i + 128))); b.push(...viaWorklet.process(sig.subarray(i, i + 128))); }
+    ok(a.length >= 2 && JSON.stringify(a) === JSON.stringify(b), `worklet source and main-thread class give identical onsets (${a.length} vs ${b.length})`);
+  }
+  { // head over the front foot at contact: moving the head 25 cm back moves the figure 25 cm
+    const { generateBatter, defaultBatter } = await import("../lib/sim/synth-pose");
+    const { extractBatting } = await import("../lib/cv/biomech");
+    const sk = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }));
+    const back = sk.map((f) => ({ t: f.t, j: { ...f.j, nose: { ...f.j.nose, y: f.j.nose.y + 0.25 } } }));
+    const a = extractBatting(sk, { hand: "RHB", impactT: 0.55 })!.biomech.headOverFrontFootCm!, b = extractBatting(back, { hand: "RHB", impactT: 0.55 })!.biomech.headOverFrontFootCm!;
+    near(b - a, 25, 0.5, "head over front foot follows the head");
+  }
+  { // dynamic centre of pressure: physics of the zero-moment point
+    const { generateBatter, defaultBatter } = await import("../lib/sim/synth-pose");
+    const { pressureSeries, weightState, centreOfMass } = await import("../lib/cv/com");
+    const base = generateBatter(defaultBatter({ fps: 30, impactT: 0.55, frontFootPct: 75 }))[0].j;
+    const feet = new Set(["lAnk", "rAnk", "lHeel", "rHeel", "lToe", "rToe"]);
+    const move = (dy: number) => Object.fromEntries(Object.entries(base).map(([k, p]) => [k, feet.has(k) ? p : { ...p, y: p.y + dy }])) as typeof base;
+    const run = (a: number, noise = 0, seed = 3) => {
+      let r = seed; const rnd = () => { r = (r * 16807) % 2147483647; return r / 2147483647 - 0.5; };
+      const fr = Array.from({ length: 31 }, (_, i) => { const t = i / 30, dy = -1 * t + 0.5 * a * t * t; const j = move(dy);
+        return { t, j: noise ? Object.fromEntries(Object.entries(j).map(([k, p]) => [k, { x: p.x + noise * rnd() * 3.46, y: p.y + noise * rnd() * 3.46, z: p.z + noise * rnd() * 3.46 }])) as typeof base : j }; });
+      return { fr, press: pressureSeries(fr, "RHB") };
+    };
+    const c = run(0), i = 15, stat = weightState(c.fr[i].j, "RHB").frontPct;
+    near(c.press[i]!, stat, 0.5, "constant velocity: pressure equals static weight");
+    const b = run(3), sb = weightState(b.fr[i].j, "RHB"), z = centreOfMass(b.fr[i].j).z;
+    const want = sb.frontPct + ((-(z / 9.81) * 3) / (sb.front.y - sb.back.y)) * 100;
+    near(b.press[i]!, Math.max(-25, Math.min(125, want)), 1, `braking at 3 m/s2 moves pressure forward by z*a/g (static ${sb.frontPct.toFixed(0)}%)`);
+    // noisy pose: every figure that is reported must be within its claimed band; the rest are refused, never guessed
+    for (const noise of [0.003, 0.01, 0.03]) {
+      const all = run(0, noise).press, rep = all.map((v, k) => [v, k] as const).filter(([v]) => v !== null) as (readonly [number, number])[];
+      const worst = rep.length ? Math.max(...rep.map(([v, k]) => Math.abs(v - weightState(c.fr[k].j, "RHB").frontPct))) : 0;
+      if (process.env.SHOW) console.log(`${noise * 100} cm noise: ${rep.length}/${all.length} reported, worst ${worst.toFixed(1)}`);
+      ok(worst < 25, `${noise * 100} cm pose noise: ${rep.length}/${all.length} frames reported, worst error ${worst.toFixed(1)} points (limit 25 = 2.5 sigma)`);
+    }
+  }
+  { // bat as a two-point skeleton from oriented boxes
+    const { decodeObb, obbEnds, batFromBoxes, batSwing, BAT_LENGTH_M } = await import("../lib/cv/bat");
+    // tensor [1, 6, N]: cx cy w h score angle; two overlapping boxes of one bat and one weak box
+    const N = 3, rows = [[100, 101, 300], [200, 202, 50], [240, 236, 30], [20, 22, 10], [0.9, 0.6, 0.1], [Math.PI / 2, Math.PI / 2, 0]];
+    const flat = rows.flat(), boxes = decodeObb(flat, N);
+    ok(boxes.length === 1 && boxes[0].conf === 0.9, `decodeObb keeps one box per bat (${boxes.length})`);
+    const [a, b] = obbEnds(boxes[0]);
+    ok(Math.abs(a.x - 100) < 1e-6 && Math.abs(Math.abs(a.y - b.y) - 240) < 1e-6, "long axis along the box's angle");
+    const bp = batFromBoxes(boxes, 0, { x: 100, y: 75 })!;
+    ok(bp.handle.y < bp.toe.y && Math.abs(bp.handle.y - 80) < 1e-6, "the end nearer the hands is the handle");
+    ok(batFromBoxes(boxes, 0, { x: 600, y: 600 }) === null, "a bat far from the batter's hands is ignored");
+    // a 200 px bat swinging about its handle at 1500 deg/s from 120 deg (toe up and back) through vertical at contact
+    const L = 200, w = (1500 * Math.PI) / 180, imp = 0.5, tr = [];
+    for (let k = 0; k <= 30; k++) { const t = k / 60, ang = w * (t - imp); tr.push({ t, handle: { x: 300, y: 200 }, toe: { x: 300 + L * Math.sin(ang), y: 200 + L * Math.cos(ang) }, conf: 0.9, lenPx: L }); }
+    const sw = batSwing(tr, imp, 31)!;
+    near(sw.batAngleAtContactDeg, 0, 0.5, "straight bat at contact reads 0 degrees");
+    near(sw.peakAngularDegS, 1500, 15, "angular speed recovered");
+    near(sw.toeSpeedKph, w * BAT_LENGTH_M * 3.6, 1, "toe speed = angular speed x bat length");
+    ok(sw.coverage === 1 && sw.batLiftDeg > 60, `lift and coverage (${sw.batLiftDeg} deg, ${sw.coverage})`);
+    const flipped = tr.map((p, k) => (k === 12 ? { ...p, handle: p.toe, toe: p.handle } : p));
+    near(batSwing(flipped, imp, 31)!.peakAngularDegS, 1500, 15, "a single flipped frame is rejected, not read as a 180 degree whip");
+  }
   console.log(`checks: ${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);
 }

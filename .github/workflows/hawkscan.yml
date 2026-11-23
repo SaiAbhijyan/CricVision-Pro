@@ -1,0 +1,47 @@
+name: HawkScan DAST
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hawkscan:
+    runs-on: ubuntu-latest
+    # forks and repos without a StackHawk key skip instead of failing
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Start production server
+        run: |
+          nohup npx next start -p 3111 > next.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3111/ > /dev/null && exit 0; sleep 2; done
+          cat next.log; exit 1
+      - name: Check for StackHawk key
+        id: key
+        env:
+          HAWK_API_KEY: ${{ secrets.HAWK_API_KEY }}
+        run: echo "present=$([ -n "$HAWK_API_KEY" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: HawkScan
+        if: steps.key.outputs.present == 'true'
+        uses: stackhawk/hawkscan-action@v3.1.1
+        with:
+          apiKey: ${{ secrets.HAWK_API_KEY }}
+          configurationFiles: stackhawk.yml
+        env:
+          APP_ID: ${{ vars.HAWK_APP_ID }}
+          APP_ENV: ci
+          APP_HOST: http://localhost:3111
+      - name: No StackHawk key
+        if: steps.key.outputs.present != 'true'
+        run: echo "::notice::HAWK_API_KEY not set; HawkScan skipped. Add it under Settings → Secrets to enable DAST."

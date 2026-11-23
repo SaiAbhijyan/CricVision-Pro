@@ -3,13 +3,14 @@
  * `ClipSource` (an uploaded video in the browser, rendered frames in tests). It returns the same BallRecords, so the
  * scoreboard, report and replay screens treat an uploaded clip exactly like a live session.
  */
-import type { AnalysisQuality, BallRecord, Calibration, CameraModel, ClipMeta, FieldPlayer, SessionConfig } from "@/lib/types";
-import { buildCameraModel } from "@/lib/physics/homography";
+import type { AnalysisQuality, BallRecord, Calibration, CameraModel, ClipMeta, FieldPlayer, Pt, SessionConfig } from "@/lib/types";
+import { batSwing, type BatPose, type BatSwing } from "@/lib/cv/bat";
+import { buildCameraModel, cameraCentre } from "@/lib/physics/homography";
 import { fitFlightTo2D, type FitResult, type TrackObs } from "@/lib/physics/trackfit";
 import { toGray, type Gray } from "@/lib/cv/ball-detector";
 import type { Skeleton } from "@/lib/cv/skeleton";
 import type { PosePair } from "@/lib/cv/pose";
-import { alignToStance, detectSwings, swingRecords } from "@/lib/upload/swing";
+import { alignToStance, detectSwings, fixLeftRight, stanceAxisToCameraDeg, swingRecords } from "@/lib/upload/swing";
 import { BATTER_CREASE_Y } from "@/lib/physics/constants";
 import { CutDetector, shotsFromCuts, type Shot } from "@/lib/upload/shots";
 import { DeliveryTracker } from "@/lib/live/delivery-tracker";
@@ -33,11 +34,17 @@ export interface ClipSource {
   frameCount: number;
   /** Frame k at the downscaled analysis size. `t` is clip time in real seconds. */
   frame(k: number, o: { pose: boolean; poseCam?: CameraModel }): Promise<ClipFrame>;
+  /** called at a camera cut, so person-following restarts in the new shot */
+  newShot?(): void;
+  /** the full-colour frame k (for bat tracking); sources without colour leave it out */
+  image?(k: number): Promise<{ img: CanvasImageSource; w: number; h: number; t: number } | null>;
 }
 
 export interface ManualContact { t: number; kind: ImpactKind }
 
 export interface AnalyseOptions {
+  /** bat detector (two-point bat skeleton per frame); run on the frames around each swing when the source has colour frames */
+  bat?: { detect(img: CanvasImageSource, W: number, H: number, t: number, hands: Pt | null): Promise<BatPose | null> };
   /** analyse only this part of the clip, in clip seconds (e.g. one camera shot of a highlights reel) */
   range?: { start: number; end: number };
   cfg: SessionConfig;
@@ -82,6 +89,23 @@ const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 /** Trust in the flight numbers from how many ball positions were seen and how well the physics model matched them. */
 /** Physical sanity of a fitted flight. A low pixel residual alone does not prove the 3-D solution: one camera leaves speed and height partly ambiguous. */
 export interface FlightPhysics { speedKph: number; releaseY: number; coverage: number; speedSigmaKph?: number }
+
+/** The one refusal policy for every ball-flight figure, uploads and live alike. A short track cannot support a tight
+ *  profile likelihood, so its uncertainty is floored; the jackknife (each quarter of the track left out) catches systematic
+ *  error the residual sigma cannot see. Extra tracks found offline (hypotheses) must clear a higher bar than the main one. */
+export function gateFlight(fr: FitResult, nObs: number, fps: number, hypothesis = false, cam?: CameraModel): { sigEff: number; confidence: number; warnings: string[]; refuse: string | null } {
+  // A low camera looks almost along the ball's path, so speed and distance trade off: on synthetic deliveries a 1.3 m tripod
+  // read 4-5 km/h low at 480 and 1280 px while every residual looked tight, and 2.4 m read within 1 km/h. Floor the uncertainty.
+  const camH = cam ? cameraCentre(cam).z : null, lowCam = camH !== null && camH > 0 && camH < 2;
+  const sigEff = Math.max(fr.speedSigmaKph, fr.jackSigmaKph ?? 0, nObs < 16 ? (fps < 45 ? 20 : 8) : nObs < 25 ? 3 : 0, lowCam ? 5 : 0);
+  const ys = fr.samples.map((q) => q.p.y), cov = ys.length ? Math.max(0, Math.min(1, (Math.max(...ys) - Math.min(...ys)) / 20.12)) : 0;
+  const fc = flightConfidence(nObs, fr.rmsPx, fps, { speedKph: fr.speedMs * 3.6, releaseY: fr.release.y, coverage: cov, speedSigmaKph: sigEff });
+  let refuse: string | null = null;
+  if (fr.rmsPx > 8) refuse = `The tracked points do not follow a ball flight (fit error ${fr.rmsPx.toFixed(0)} px). This usually means the camera moved or zoomed, or something other than the ball was followed.`;
+  else if (fc.confidence < (hypothesis ? 0.5 : 0.35) || sigEff > 20) refuse = `Too uncertain to report (confidence ${(fc.confidence * 100).toFixed(0)}%, speed ±${sigEff.toFixed(0)} km/h): ${fc.warnings.slice(0, 2).join(" ")}`;
+  if (lowCam) fc.warnings.push(`The camera is about ${camH!.toFixed(1)} m high. From below about 2 m one camera cannot fully separate the ball's speed from its distance, so speed is uncertain by about ±5 km/h. Raise the camera to 2-2.5 m for tighter figures.`);
+  return { sigEff, confidence: fc.confidence, warnings: fc.warnings, refuse };
+}
 
 export function flightConfidence(trackPoints: number, rmsPx: number, fps: number, phys?: FlightPhysics): { confidence: number; warnings: string[] } {
   const w: string[] = [];
@@ -139,24 +163,21 @@ export async function analyseClip(src: ClipSource, o: AnalyseOptions): Promise<A
     if (!obs) { diag.reason = "The ball was tracked for too few frames before contact to analyse."; return false; }
     const fr = await fit(model, obs, cfg.surface);
     if (!fr) { diag.reason = "The flight fit failed."; return false; }
-    if (fr.rmsPx > 8) { diag.reason = `The tracked points do not follow a ball flight (fit error ${fr.rmsPx.toFixed(0)} px). This usually means the camera moved or zoomed, or something other than the ball was followed.`; return false; }
+    const gate = gateFlight(fr, obs.length, src.fps, hypothesis, model);
+    if (gate.refuse && fr.rmsPx > 8) { diag.reason = gate.refuse; return false; }
     const res = buildLiveBall({ fit: fr, cfg, cam: model, field, score, index: balls.length, startedAt: Date.now(), bowlerFrames: win(bowler), batterFrames: win(batter), track: pts, impact: hit });
     if (!res) { diag.reason = "The delivery could not be assembled."; return false; }
     const r = res.record;
     // a short track cannot support a tight profile-likelihood: floor the uncertainty so a 13-point fit is never shown as +/-2 km/h
     // the fit's jackknife (each quarter of the track left out, refitted from this solution) catches systematic error the
     // residual-based sigma cannot see: texture under the ball, blur near the camera, another object for a few frames
-    const jack = fr.jackSigmaKph ?? 0;
-    const sigEff = Math.max(fr.speedSigmaKph, jack, obs.length < 16 ? (src.fps < 45 ? 20 : 8) : obs.length < 25 ? 3 : 0);
-    const ys = fr.samples.map((q) => q.p.y), cov = Math.max(0, Math.min(1, (Math.max(...ys) - Math.min(...ys)) / 20.12));
-    const fc = flightConfidence(obs.length, fr.rmsPx, src.fps, { speedKph: fr.speedMs * 3.6, releaseY: fr.release.y, coverage: cov, speedSigmaKph: sigEff });
-    const q: AnalysisQuality = { trackPoints: obs.length, fitRmsPx: +fr.rmsPx.toFixed(2), speedSigmaKph: sigEff, contact, bowlerPoseFrames: win(bowler).length, batterPoseFrames: win(batter).length, confidence: fc.confidence, warnings: fc.warnings };
+    const q: AnalysisQuality = { trackPoints: obs.length, fitRmsPx: +fr.rmsPx.toFixed(2), speedSigmaKph: gate.sigEff, contact, bowlerPoseFrames: win(bowler).length, batterPoseFrames: win(batter).length, confidence: gate.confidence, warnings: gate.warnings };
     if (!hit) q.warnings.push("No bat or pad contact was found, so the shot, timing and batting numbers are not available. Mark the contact frame to add them.");
     if (cfg.mode !== "Batting Focus" && q.bowlerPoseFrames < 6) q.warnings.push("The bowler's body was not found often enough to measure the action.");
     if (cfg.mode !== "Bowling Focus" && hit && q.batterPoseFrames < 6) q.warnings.push("The batter's body was not found often enough to measure the swing and weight transfer.");
     // A figure this uncertain is not worth showing. Extra tracks found offline (hypotheses) are more often not balls, so they
     // have to clear a higher bar than the main track.
-    if (q.confidence < (hypothesis ? 0.5 : 0.35) || sigEff > 20) { diag.reason = `Too uncertain to report (confidence ${(q.confidence * 100).toFixed(0)}%, speed ±${sigEff.toFixed(0)} km/h): ${q.warnings.slice(0, 2).join(" ")}`; return false; }
+    if (gate.refuse) { diag.reason = gate.refuse; return false; }
     r.quality = q; r.synthetic = false;
     balls.push(r); wagons.push(res.wagon);
     score = applyOutcome(score, r.outcome, res.wagon);
@@ -308,7 +329,7 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
   const { cfg } = o;
   const warnings: string[] = [];
   const cuts = new CutDetector();
-  const batter: Skeleton[] = [];
+  const batter: Skeleton[] = [], frameT: number[] = [];
   let tFirst: number | null = null, tLastF = 0;
   const k0 = o.range ? Math.max(0, Math.floor(o.range.start * src.fps)) : 0;
   const k1 = o.range ? Math.min(src.frameCount, Math.ceil(o.range.end * src.fps)) : src.frameCount;
@@ -316,34 +337,80 @@ async function analyseSwingsOnly(src: ClipSource, o: AnalyseOptions): Promise<An
   for (let k = k0; k < k1; k++) {
     if (o.signal?.aborted) break;
     const f = await src.frame(k, { pose: (k - k0) % stride === 0 });
-    if (tFirst === null) tFirst = f.t; tLastF = f.t;
-    cuts.push(f.t, f.gray);
+    if (tFirst === null) tFirst = f.t; tLastF = f.t; frameT.push(f.t);
+    if (cuts.push(f.t, f.gray)) src.newShot?.();
     if (f.pose?.batter) batter.push(f.pose.batter);
     if (k % 5 === 0) o.onProgress?.(k - k0, k1 - k0, `Frame ${k + 1} of ${k1}`);
   }
   const balls: BallRecord[] = [], rejected: string[] = [];
+  let lrSwaps = 0;
   const edges = [-Infinity, ...cuts.cuts, Infinity];
   for (let i = 0; i < edges.length - 1 && !o.signal?.aborted; i++) {
     const seg = batter.filter((b) => b.t >= edges[i] && b.t < edges[i + 1]);
     if (seg.length < 10) continue;
     const first = detectSwings(seg)[0];
-    const aligned = alignToStance(seg, cfg.handedness, BATTER_CREASE_Y, first !== undefined ? first - 0.6 : undefined);
+    const stanceBefore = first !== undefined ? first - 0.6 : undefined;
+    const lr = fixLeftRight(seg, cfg.handedness, stanceBefore);
+    if (lr.swapped) lrSwaps++;
+    const al = alignToStance(lr.frames, cfg.handedness, BATTER_CREASE_Y, stanceBefore);
+    const aligned = al;
+    // the pitch direction measured against the camera's line of sight (+Y before alignment): near 0 = filmed front-on or from
+    // behind, where weight transfer and swing path lie along the depth a single camera cannot see
+    const axisDeg = stanceAxisToCameraDeg(lr.frames, cfg.handedness, stanceBefore);
     for (const x of swingRecords(aligned, cfg.handedness, cfg, balls.length, Date.now(), rejected)) {
+      if (axisDeg < 35 && x.record.batting) {
+        x.record.batting.unmeasured = [...new Set([...(x.record.batting.unmeasured ?? []), "weight" as const, "path" as const])];
+        x.record.quality!.warnings.push(`This camera looks along the batter's stride (${Math.round(axisDeg)}° off the line of sight), so weight transfer and swing path are not measured: film side-on for those.`);
+      }
       x.record.quality!.warnings.push("Batting-only mode: scale comes from the batter's height and direction from the stance, so lengths are approximate.");
+      if (o.bat && src.image && x.record.batting) {
+        const bs = await trackBat(src, o.bat, frameT, k0, x.impactT, seg);
+        if (bs) x.record.batting.bat = batForSwing(bs, x.record.batting.downswingMs);
+        else x.record.quality!.warnings.push("The bat was not seen clearly enough around contact to track it (edge-on to the camera or hidden by the body).");
+      }
       balls.push(x.record);
       await o.onDelivery?.({ index: x.record.index, tStart: x.impactT - 1.2, tEnd: x.impactT + 0.4, track: [], record: x.record, bowler: [], batter: aligned.filter((f) => f.t >= x.impactT - 2.5 && f.t <= x.impactT + 0.4) });
     }
   }
   if (cuts.cuts.length) warnings.push(`This clip has ${cuts.cuts.length + 1} camera shots; each was analysed on its own.`);
+  if (lrSwaps) warnings.push(`The body tracker mixed up the batter's left and right in ${lrSwaps} shot${lrSwaps > 1 ? "s" : ""}; this was detected from the stance and corrected.`);
   if (rejected.length) {
     const why = [...new Set(rejected)].map((r) => `${r} (${rejected.filter((x) => x === r).length})`).join("; ");
     warnings.push(`${rejected.length} other movement${rejected.length > 1 ? "s" : ""} looked like swings but failed the checks and are not shown: ${why}.`);
   }
+  const poseFrames = Math.ceil((k1 - k0) / stride);
+  warnings.push(`Body found in ${batter.length} of ${poseFrames} frames analysed (${Math.round((100 * batter.length) / Math.max(1, poseFrames))}%).`);
   if (!batter.length) warnings.push("No batter was found. The batter needs to be fully in frame, head to feet.");
   else if (!balls.length) warnings.push("The batter was found but no full swing was seen. Slow-motion replays need the slow-motion setting; leaves and blocks with little bat movement are not counted as swings.");
   if (balls.length) warnings.push(`${balls.length} swing${balls.length > 1 ? "s" : ""} analysed from the body alone: bat speed, weight transfer, head movement and swing plane. Timing, shot and runs need the ball.`);
   o.onProgress?.(k1 - k0, k1 - k0, "Done");
   return { balls, wagons: balls.map(() => undefined), score: newScore(cfg.format), field: [], diagnostics: [], warnings, model: null, shots: shotsFromCuts(cuts.cuts, tLastF + 1 / src.fps, 0.4, tFirst ?? 0) };
+}
+
+/** A slow-motion replay (downswing over 0.7 s) keeps the bat's angles but not its speeds: same rule as the hand-based bat speed. */
+export function batForSwing(bs: BatSwing | NonNullable<NonNullable<BallRecord["batting"]>["bat"]>, downswingMs: number): NonNullable<BallRecord["batting"]>["bat"] {
+  if (downswingMs <= 700) return bs;
+  const { toeSpeedKph: _ts, peakAngularDegS: _pa, ...angles } = bs; void _ts; void _pa;
+  return angles;
+}
+
+/** Bat skeleton on every frame from 0.6 s before contact to 0.12 s after, oriented by the batter's hands, then swing metrics. */
+async function trackBat(src: ClipSource, det: NonNullable<AnalyseOptions["bat"]>, frameT: number[], k0: number, impactT: number, people: Skeleton[]) {
+  const ks: number[] = [];
+  for (let i = 0; i < frameT.length; i++) if (frameT[i] >= impactT - 0.6 && frameT[i] <= impactT + 0.12) ks.push(k0 + i);
+  const step = Math.max(1, Math.round(ks.length / 36));   // at most ~36 detections per swing
+  const track: BatPose[] = [];
+  let n = 0;
+  for (let i = 0; i < ks.length; i += step) {
+    const im = await src.image!(ks[i]);
+    if (!im) continue;
+    n++;
+    const near = people.reduce<Skeleton | null>((b, p) => (!b || Math.abs(p.t - im.t) < Math.abs(b.t - im.t) ? p : b), null);
+    const hands = near?.hn && Math.abs(near.t - im.t) < 0.1 ? { x: near.hn.x * im.w, y: near.hn.y * im.h } : null;
+    try { const p = await det.detect(im.img, im.w, im.h, im.t, hands); if (p) track.push(p); } catch { return null; }
+  }
+  const bs = batSwing(track, impactT, n);
+  return bs && bs.coverage >= 0.4 ? bs : null;
 }
 
 export { toGray };

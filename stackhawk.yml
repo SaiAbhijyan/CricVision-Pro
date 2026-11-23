@@ -1,0 +1,28 @@
+# StackHawk HawkScan DAST config. CI runs it against a local production build (see .github/workflows/hawkscan.yml).
+# Set the repo secret HAWK_API_KEY and the repo variable HAWK_APP_ID (from app.stackhawk.com → Applications).
+app:
+  applicationId: ${APP_ID}
+  env: ${APP_ENV:ci}
+  host: ${APP_HOST:http://localhost:3111}
+  # The app is a client-side SPA plus a few JSON API routes; seed the spider with every page and route.
+  excludePaths:
+    - "/_next/static/.*"
+    - "/mediapipe/.*"
+    - "/models/.*"
+hawk:
+  spider:
+    base: true
+    ajax: false
+    seedPaths:
+      - /
+      - /session?mode=live
+      - /session?mode=sim
+      - /analyse
+      - /profile
+      - /report/demo
+      - /api/coach/live
+      - /api/coach/report
+  failureThreshold: medium
+hawkAddOn:
+  replacer:
+    rules: []
